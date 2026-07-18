@@ -1,0 +1,25 @@
+{
+  "pap": [
+    {
+      "type": "photo",
+      "id": 6255794929950986777,
+      "access_hash": 3367666206396450532,
+      "file_reference": "01000002856a5a1d7bcd2fcb591e24ce260398b68a9571d334",
+      "mime_type": null,
+      "caption": "",
+      "date": "2026-07-17T12:10:53+00:00"
+    }
+  ],
+  "video": [],
+  "vip_preview": [
+    {
+      "type": "photo",
+      "id": 6253655752769737163,
+      "access_hash": 6469859956284350570,
+      "file_reference": "010000017f6a5a1d7b988daf5080deaa0154e725b30d124e8a",
+      "mime_type": null,
+      "caption": "",
+      "date": "2026-07-16T12:51:26+00:00"
+    }
+  ]
+}
