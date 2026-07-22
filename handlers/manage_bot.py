@@ -1914,10 +1914,17 @@ MENU_TEXT_MAP.update(
 def get_httpx_request():
     return HTTPXRequest(
         connect_timeout=30.0,
-        read_timeout=30.0,
+        read_timeout=60.0,
         write_timeout=30.0,
         pool_timeout=30.0,
     )
+
+
+async def handle_manage_bot_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if isinstance(context.error, (TimedOut, NetworkError)):
+        logger.debug("ManageBot long-polling network flicker (normal): %s", context.error)
+    else:
+        logger.error("Error pada ManageBot: %s", context.error, exc_info=context.error)
 
 
 # --- APPLICATION BUILDER ---
@@ -1925,6 +1932,7 @@ def build_application():
     load_env()
     token = os.getenv("MANAGE_BOT_TOKEN", "").strip() or MANAGE_TOKEN
     app = Application.builder().token(token).request(get_httpx_request()).build()
+    app.add_error_handler(handle_manage_bot_error)
 
     fallback_handlers = [
         MessageHandler(
