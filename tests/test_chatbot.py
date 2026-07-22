@@ -300,13 +300,12 @@ def test_detect_intent_none():
     assert media_handler.detect_intent("mau join vip dong") is None  # "vip" alone maps to vip_preview but "join" shouldn't
 
 def test_media_config_exists():
-    """media_config.json harus ada."""
-    assert os.path.exists("media_config.json") or os.path.exists(os.path.join("telegram-chatbot", "media_config.json"))
+    """INTENT_KEYWORDS harus terdefinisi di media_handler."""
+    assert hasattr(media_handler, "INTENT_KEYWORDS")
 
 def test_media_config_structure():
-    """media_config.json harus punya key pap, video, vip_preview."""
-    path = "media_config.json" if os.path.exists("media_config.json") else os.path.join("telegram-chatbot", "media_config.json")
-    cfg = json.loads(open(path, encoding="utf-8").read())
+    """INTENT_KEYWORDS harus punya key pap, video, vip_preview."""
+    cfg = media_handler.INTENT_KEYWORDS
     assert "pap" in cfg
     assert "video" in cfg
     assert "vip_preview" in cfg

@@ -40,6 +40,8 @@ from telegram import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
+from telegram.request import HTTPXRequest
+from telegram.error import TimedOut, NetworkError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -1779,7 +1781,7 @@ async def bot_add_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     bot_username = ""
     try:
-        temp_app = Application.builder().token(token).build()
+        temp_app = Application.builder().token(token).request(get_httpx_request()).build()
         await temp_app.initialize()
         bot_info = await temp_app.bot.get_me()
         bot_username = bot_info.username or ""
@@ -1909,9 +1911,18 @@ MENU_TEXT_MAP.update(
 )
 
 
+def get_httpx_request():
+    return HTTPXRequest(
+        connect_timeout=30.0,
+        read_timeout=30.0,
+        write_timeout=30.0,
+        pool_timeout=30.0,
+    )
+
+
 # --- APPLICATION BUILDER ---
 def build_application():
-    app = Application.builder().token(MANAGE_TOKEN).build()
+    app = Application.builder().token(MANAGE_TOKEN).request(get_httpx_request()).build()
 
     fallback_handlers = [
         MessageHandler(
@@ -2126,18 +2137,49 @@ async def start_manage_bot():
     if not MANAGE_TOKEN:
         logger.warning("MANAGE_BOT_TOKEN kosong, manage bot gak jalan.")
         return
-    app = build_application()
-    logger.info("Manage bot (ReplyKeyboardMarkup & Inline Interactive) jalan...")
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling(drop_pending_updates=True)
-    try:
-        while True:
-            await asyncio.sleep(3600)
-    except (asyncio.CancelledError, KeyboardInterrupt):
-        await app.updater.stop()
-        await app.stop()
-        await app.shutdown()
+
+    retry_delay = 5
+    while True:
+        app = None
+        try:
+            app = build_application()
+            logger.info("Manage bot (ReplyKeyboardMarkup & Inline Interactive) jalan...")
+            await app.initialize()
+            await app.start()
+            await app.updater.start_polling(drop_pending_updates=True)
+            retry_delay = 5
+
+            try:
+                while True:
+                    await asyncio.sleep(3600)
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                logger.info("Manage bot dihentikan secara normal.")
+                await app.updater.stop()
+                await app.stop()
+                await app.shutdown()
+                break
+            except Exception as loop_exc:
+                logger.warning("Main loop manage bot terganggu: %s. Melakukan restart...", loop_exc)
+        except (TimedOut, NetworkError) as net_err:
+            logger.error("Network timeout pada manage bot: %s. Reconnecting dalam %d detik...", net_err, retry_delay)
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 60)
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            break
+        except Exception as exc:
+            logger.error("Error pada start_manage_bot: %s. Retry dalam %d detik...", exc, retry_delay)
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 60)
+        finally:
+            if app:
+                try:
+                    if app.updater and app.updater.running:
+                        await app.updater.stop()
+                    if app.running:
+                        await app.stop()
+                    await app.shutdown()
+                except Exception:
+                    pass
 
 
 def run_manage_bot():
