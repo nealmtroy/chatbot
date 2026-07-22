@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from typing import Dict, Any, Optional
-import clients
+from core import clients
 from .base import ContextData, MemoryData, PersonalityData, ResponseDraft
 
 logger = logging.getLogger("ResponseAgent")
@@ -45,9 +45,21 @@ class ResponseAgent:
             logger.error("Client AI tidak terinisialisasi.")
             return ResponseDraft(raw_text="")
 
-        messages = [{"role": "system", "content": personality.system_prompt}]
+        messages = []
         for msg in context.last_messages[-max_history:]:
-            messages.append(msg)
+            messages.append({"role": msg["role"], "content": msg["content"]})
+
+        # Check if the last message in history is the current message.
+        has_current = False
+        if messages:
+            last_msg = messages[-1]
+            if last_msg["role"] == "user" and last_msg["content"] == context.message_text:
+                has_current = True
+
+        if not has_current:
+            messages.append({"role": "user", "content": context.message_text})
+
+        messages.insert(0, {"role": "system", "content": personality.system_prompt})
 
         response = await _call_api_with_retry(messages)
         if response is None:

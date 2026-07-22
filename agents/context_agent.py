@@ -1,7 +1,7 @@
 import datetime
 import logging
 from typing import Dict, Any, List
-import db
+from core import db
 from .base import ContextData
 
 logger = logging.getLogger("ContextAgent")

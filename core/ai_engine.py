@@ -3,15 +3,15 @@ import re
 import json
 import asyncio
 import logging
-from env_loader import load_env
+from .env_loader import load_env
 
 # Load environment variables
 load_env()
 
 # Inisialisasi client AI terpusat (Groq / OpenRouter)
-import clients
-import db
-import user_tracker
+from . import clients
+from . import db
+from . import user_tracker
 
 logger = logging.getLogger("AI-Engine")
 
@@ -115,7 +115,7 @@ def retrieve_relevant_knowledge(message_text, knowledge_file=None, account_id=0)
     if matched_facts:
         logger.info("retrieve %d fakta relevan", len(matched_facts))
         retrieved_text = "\n".join([f"- {fact}" for fact in matched_facts])
-        return f"\n[RELEVANT_KNOWLEDGE_FACTS]\nFakta tentang kamu yang wajib dipakai menjawab:\n{retrieved_text}\n"
+        return f"\n[RELEVANT_KNOWLEDGE_FACTS]\nGunakan informasi fakta berikut sebagai referensi pengetahuan kamu (tetap jawab secara alami, ringkas, santai, dan tidak kaku/oversharing):\n{retrieved_text}\n"
 
     return ""
 
@@ -160,7 +160,7 @@ from agents.pipeline import DigitalClonePipeline
 _digital_clone_pipeline = DigitalClonePipeline(prompts_dir=PROMPTS_DIR)
 
 
-async def generate_ai_reply(account, user_db_id, user_name, message_text, max_history=20):
+async def generate_ai_reply(account, user_db_id, user_name, message_text, max_history=20, return_full_output=False):
     """
     Menghasilkan balasan dari AI untuk 1 user di 1 account tertentu menggunakan
     DigitalClonePipeline (6 Specialized Agents: Context, Memory, Personality, Response, Critic, Confidence).
@@ -170,7 +170,7 @@ async def generate_ai_reply(account, user_db_id, user_name, message_text, max_hi
     """
     if not clients.client:
         logger.error(f"Client untuk provider {clients.SELECTED_PROVIDER} tidak diinisialisasi.")
-        return None, []
+        return (None, []) if not return_full_output else None
 
     output = await _digital_clone_pipeline.execute(
         account=account,
@@ -188,6 +188,9 @@ async def generate_ai_reply(account, user_db_id, user_name, message_text, max_hi
     # If confidence status is hold (confidence too low), log warning
     if conf.status == "hold":
         logger.warning(f"Confidence score low ({conf.score:.1f}%): {conf.reason}")
+
+    if return_full_output:
+        return output
 
     return output.final_text, output.bubbles
 
@@ -220,7 +223,7 @@ async def generate_media_followup(account, user_db_id, user_name, message_text, 
         "Sekarang buat SATU bubble chat pendek (maksimal 1 kalimat, maksimal 12 kata) "
         "untuk ngeyakinin user buat join grup VIP. Wajib sebutin bahwa di grup VIP masih "
         "banyak lagi, ada video colmek dan video ngewe punya kamu. Gaya flirty ala "
-        f"{account.get('name','Alya')}, "
+        f"{account.get('name', 'pemilik akun')}, "
         "casual, boleh ada 1 emoji di akhir kalau natural. JANGAN bilang 'aku manusia' / "
         "'aku bot' / 'aku asli'. JANGAN jelasin panjang lebar. Cuma 1 bubble aja.\n"
         "Contoh gaya: 'di grup vip ak masi byk lg loh, ada vid colmek sam vid ngewe ak 🫣'\n"

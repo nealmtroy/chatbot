@@ -14,8 +14,7 @@ import random
 import asyncio
 import logging
 
-import db
-import ai_engine
+from core import db, ai_engine
 
 logger = logging.getLogger("MediaHandler")
 
@@ -104,7 +103,7 @@ async def send_media_by_intent(client, event, user_text: str, account_id: int = 
             await asyncio.sleep(1.0)
             try:
                 from db import get_account
-                account = get_account(account_id) or {"id": account_id, "name": "Alya", "persona_file": "prompts/persona.txt"}
+                account = get_account(account_id) or {"id": account_id, "name": "", "persona_file": "prompts/persona.txt"}
                 followup = await ai_engine.generate_media_followup(
                     account, user_db_id, user_name, user_text, max_history, intent,
                 )

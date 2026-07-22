@@ -1,24 +1,47 @@
-# Secrets & credentials
+# Environment & Secrets
 .env
+.env.*
+!.env.example
 *.session
 *.session-journal
+sessions/
+*.pem
+*.key
 
-# Python cache
+# Python / Virtual Environment
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
 
-# Runtime / generated data
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Runtime & Generated Data
 corrections.json
 chat_history.json
 reviewer_logs/
-.pytest_cache/
 *.log
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 *.bak_*
+data/
+downloads/
+temp/
+tmp/
 
 # OS junk
 .DS_Store
 Thumbs.db
+

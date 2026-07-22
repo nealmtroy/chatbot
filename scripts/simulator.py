@@ -9,15 +9,14 @@ sys.path.insert(0, SCRIPT_DIR)
 import asyncio
 import random
 import logging
-from env_loader import load_env
+from core.env_loader import load_env
 
 # Reconfigure stdout to use UTF-8 to prevent UnicodeEncodeError in Windows terminals
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 # Import Modul AI Engine dari Proyek
-import ai_engine
-import clients
+from core import db, ai_engine, clients
 
 import tester
 import reviewer
@@ -55,11 +54,32 @@ async def run_simulation(scenario_id="1", turns=8):
     print("=" * 60)
     print("[*] Menginisialisasi sistem percakapan...")
 
-    # Mock data untuk Alya
-    alya_history = {}
+    # Load account pertama dari DB
+    db.init_db()
+    accounts = db.list_accounts(active_only=True)
+    if not accounts:
+        acc_id = db.add_account(
+            name="Alya",
+            session_file="alya.session",
+            api_id=12345,
+            api_hash="mock_hash",
+            persona_file="prompts/persona.txt",
+            knowledge_file="knowledge.json"
+        )
+        account = db.get_account(acc_id)
+    else:
+        account = accounts[0]
+
     # Gunakan ID mock acak (bukan ID Telegram asli pemilik) agar tidak bentrok
     # dengan sesi nyata / data riil.
-    mock_user_id = random.randint(1000000000, 9999999999)
+    mock_user_tg_id = random.randint(1000000000, 9999999999)
+    user = db.get_or_create_user(
+        account_id=account["id"],
+        tg_user_id=mock_user_tg_id,
+        first_name=mock_user_name,
+        username=mock_user_name.lower()
+    )
+    user_db_id = user["id"]
 
     # Cache history untuk Tester
     tester_history = [{"role": "system", "content": tester_prompt}]
@@ -77,31 +97,34 @@ async def run_simulation(scenario_id="1", turns=8):
         print(f"\033[94m{mock_user_name}:\033[0m {current_message}")
         chat_transcript += f"{mock_user_name}: {current_message}\n"
 
-        # Simpan ke cache Alya
-        if mock_user_id not in alya_history:
-            alya_history[mock_user_id] = []
-        alya_history[mock_user_id].append({"role": "user", "content": current_message})
+        # Simpan ke DB
+        db.add_message(account["id"], user_db_id, "user", current_message)
 
-        # --- TURN ALYA (AI BOT) ---
+        # --- TURN AI BOT ---
+        acc_name = account.get("name", "AI")
         # Jeda simulasi mengetik (dikurangi sedikit agar tidak terlalu lama)
         await asyncio.sleep(2.0)
 
         # generate_ai_reply mengembalikan (reply_text_utuh, bubbles_list)
         reply_text, bubbles = await ai_engine.generate_ai_reply(
-            mock_user_id, mock_user_name, current_message, alya_history, max_history_per_user=20
+            account=account,
+            user_db_id=user_db_id,
+            user_name=mock_user_name,
+            message_text=current_message,
+            max_history=20
         )
 
         if not reply_text:
-            print("\033[91mAlya:\033[0m (Tidak merespon/Error)")
-            chat_transcript += "Alya: (Tidak merespon/Error)\n"
+            print(f"\033[91m{acc_name}:\033[0m (Tidak merespon/Error)")
+            chat_transcript += f"{acc_name}: (Tidak merespon/Error)\n"
             break
 
-        # Simpan balasan Alya ke history-nya sendiri
-        alya_history[mock_user_id].append({"role": "assistant", "content": reply_text})
+        # Simpan balasan AI ke DB
+        db.add_message(account["id"], user_db_id, "assistant", reply_text)
 
-        # Cetak balasan Alya (simulasi multi-bubble)
-        print(f"\033[95mAlya:\033[0m", end="")
-        chat_transcript += f"Alya: {reply_text}\n"
+        # Cetak balasan AI (simulasi multi-bubble)
+        print(f"\033[95m{acc_name}:\033[0m", end="")
+        chat_transcript += f"{acc_name}: {reply_text}\n"
         for i, bubble in enumerate(bubbles):
             if i > 0:
                 print("      ", end="")

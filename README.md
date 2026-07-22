@@ -1,6 +1,6 @@
 # Telegram Chatbot Multi-Account & Digital Clone
 
-An advanced, multi-account Telegram Userbot powered by a multi-agent digital clone AI pipeline and integrated with SociaBuzz QRIS VIP payment flows. The system runs concurrent userbot personas (e.g., Alya, Intan), responds to messages automatically using customizable personality constraints, handles payments for VIP upgrades, and offers an administrative control bot for the bot owner.
+An advanced, multi-account Telegram Userbot powered by a multi-agent digital clone AI pipeline. The system runs concurrent userbot personas (e.g., Alya, Intan), responds to messages automatically using customizable personality constraints, handles payments for VIP upgrades, and offers an administrative control bot for the bot owner.
 
 ---
 
@@ -14,11 +14,6 @@ An advanced, multi-account Telegram Userbot powered by a multi-agent digital clo
     *   **Response Agent**: Drafts the initial reply.
     *   **Critic Agent**: Refines grammar, tone, and length before sending.
     *   **Confidence Agent**: Decides if a response should be auto-sent or held for review based on a confidence threshold.
-*   **Automated VIP QRIS Flow**:
-    *   Triggered when a user asks about pricing.
-    *   Generates a QRIS code via SociaBuzz API and sends it directly in the chat.
-    *   Asynchronously polls payment status.
-    *   Upon payment, upgrades the user stage to `member` and generates a temporary group invite link to the VIP chat.
 *   **Owner Bot (Manage Bot)**: Administrative Telegram bot to control userbots, check payment status, view stats, and configure VIP pricing.
 *   **SQLite Storage**: Unified DB for user logs, chat histories, active payments, account registries, and media mappings.
 
@@ -62,12 +57,10 @@ An advanced, multi-account Telegram Userbot powered by a multi-agent digital clo
 ├── clients.py               # Centralized HTTP & LLM client initialization
 ├── db.py                    # Database schema, operations, and legacy migrations
 ├── env_loader.py            # Parses and validates environment variables
-├── main.py                  # Main entry point (starts userbots, admin bot, & payment monitor)
+├── main.py                  # Main entry point (starts userbots & admin bot)
 ├── manage_bot.py            # Admin/Owner Telegram bot handlers
 ├── media_handler.py         # Automates photo/video mappings for userbot responses
 ├── media_manager.py         # High-level media dispatching and tracking logic
-├── payment_link.py          # Connects to SociaBuzz API to generate QRIS links
-├── payment_monitor.py       # Asynchronous background loop for tracking QRIS status
 ├── user_tracker.py          # Keeps track of user funnel progress (e.g. asked_price)
 ├── requirements.txt         # Project package dependencies
 └── .gitignore               # Ignored files (secrets, database, local logs)
@@ -106,11 +99,6 @@ TELEGRAM_API_HASH=your_telegram_api_hash
 
 # Admin / Owner Bot
 MANAGE_BOT_TOKEN=your_owner_bot_token
-
-# VIP Payments (SociaBuzz)
-SOCIABUZZ_USERNAME=your_sociabuzz_username
-SOCIABUZZ_PAY_PATH=relative_or_absolute_path_to_sociabuzz_pay_module
-PAYMENT_POLL_INTERVAL=10
 ```
 
 ---
@@ -118,7 +106,7 @@ PAYMENT_POLL_INTERVAL=10
 ## 🚀 Usage
 
 ### Running the Application
-Start the unified process (Userbots, Owner Bot, and Payment Monitor in one event loop):
+Start the unified process (Userbots and Owner Bot in one event loop):
 ```bash
 python main.py
 ```

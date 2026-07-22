@@ -16,16 +16,29 @@ sys.path.insert(0, os.path.join(PROJECT_DIR, "scripts"))
 import logging
 logging.disable(logging.CRITICAL)
 
-import ai_engine
+from core import ai_engine, clients, db
 import tester
 import simulator
-import clients
 import reviewer as _rev
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def init_test_db(tmp_path, monkeypatch):
+    db_file = str(tmp_path / "test_chatbot.db")
+    monkeypatch.setattr(db, "DB_FILE", db_file)
+    if hasattr(db._local, "conn"):
+        db._local.conn = None
+    db.init_db()
+    db.add_account(name="Alya", session_file="ai_userbot_session", api_id=123, api_hash="hash")
+    yield
+    if getattr(db._local, "conn", None):
+        db._local.conn.close()
+        db._local.conn = None
+
+
 @pytest.fixture
 def tmp_knowledge(tmp_path, monkeypatch):
     """Ganti path KNOWLEDGE_FILE ke file temp agar cache/test isoasi."""
@@ -143,8 +156,10 @@ def test_simulator_mock_id_is_random_and_high():
     captured = {}
     orig_gen = ai_engine.generate_ai_reply
 
-    async def fake_gen(uid, uname, text, hist, max_history_per_user=None):
-        captured["uid"] = uid
+    async def fake_gen(account, user_db_id, user_name, message_text, max_history=20):
+        from core import db
+        u = db.get_user(user_db_id)
+        captured["uid"] = u["tg_user_id"] if u else None
         return "ok", [{"text": "ok", "delay": 0.5}]
 
     ai_engine.generate_ai_reply = fake_gen
@@ -265,7 +280,7 @@ def test_knowledge_scam_no_manusia():
 # ===========================================================================
 # media_handler tests
 # ===========================================================================
-import media_handler
+from handlers import media_handler
 
 def test_detect_intent_pap():
     assert media_handler.detect_intent("pap dong") == "pap"

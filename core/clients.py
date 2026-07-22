@@ -8,7 +8,7 @@ tester, dan simulator agar logika provider tidak diduplikasi di 4 file.
 import os
 import sys
 import logging
-from env_loader import load_env
+from .env_loader import load_env
 
 load_env()
 

@@ -22,15 +22,12 @@ import logging
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 
-from env_loader import load_env
+from core.env_loader import load_env
 
 load_env()
 
-import db
-import user_tracker
-import ai_engine
-import media_handler
-import payment_link
+from core import db, user_tracker, ai_engine
+from . import media_handler
 
 logger = logging.getLogger("AccountManager")
 
@@ -125,25 +122,18 @@ async def handle_message(account, event):
     if not reply_text:
         return
 
-    # --- DETEKSI DYNAMIC ACTION TAG DARI AI ENGINE ---
-    should_send_qris = False
-    if "[ACTION:" in reply_text:
-        should_send_qris = True
-        # Clean tag from reply_text & bubbles
-        reply_text = re.sub(r'\[ACTION:\s*SEND_QRIS_[A-Z_]+\]', '', reply_text).strip()
-        reply_text = re.sub(r'\[ACTION:\s*[A-Z_]+\]', '', reply_text).strip()
+    should_create_qris = "[ACTION:CREATE_QRIS]" in reply_text.upper()
+
+    # Clean any action tags from reply_text & bubbles if present
+    if "[ACTION:" in reply_text.upper():
+        reply_text = re.sub(r'\[ACTION:\s*[A-Z0-9_]+\]', '', reply_text, flags=re.IGNORECASE).strip()
         cleaned_bubbles = []
         for b in bubbles:
-            clean_b_text = re.sub(r'\[ACTION:\s*SEND_QRIS_[A-Z_]+\]', '', b["text"]).strip()
-            clean_b_text = re.sub(r'\[ACTION:\s*[A-Z_]+\]', '', clean_b_text).strip()
+            clean_b_text = re.sub(r'\[ACTION:\s*[A-Z0-9_]+\]', '', b["text"], flags=re.IGNORECASE).strip()
             if clean_b_text:
                 b["text"] = clean_b_text
                 cleaned_bubbles.append(b)
         bubbles = cleaned_bubbles
-
-    # Kirim QRIS jika AI memutuskan untuk memicu transaksi
-    if should_send_qris and not db.active_payment_for_user(user_id_tg):
-        await _maybe_send_qris(event, account, acc_id, user_db_id, user_id_tg, user_name)
 
     if reply_text:
         db.add_message(acc_id, user_db_id, "assistant", reply_text)
@@ -165,34 +155,14 @@ async def handle_message(account, event):
             except Exception as ex:
                 logger.error("gagal kirim bubble: %s", ex)
 
-
-async def _maybe_send_qris(event, account, acc_id, user_db_id, user_id_tg, user_name):
-    """Buat & kirim QRIS VIP ke user lewat chat pribadi userbot."""
-    if not payment_link.client_ready():
-        logger.warning("SociaBuzz belum siap, skip QRIS untuk %s", user_id_tg)
-        return
-    amount = int(account.get("vip_price") or 50000)
-    try:
-        qris = await payment_link.create_qris(user_id_tg, amount, note=f"VIP-{account.get('name','')}")
-    except Exception as e:
-        logger.error("Gagal bikin QRIS: %s", e)
-        return
-    try:
-        sent = await event.respond(
-            qris["caption"],
-            file=__import__("io").BytesIO(qris["qr_bytes"]),
+    if should_create_qris:
+        await payment_handler.create_and_send_qris(
+            client=event.client,
+            event=event,
+            account=account,
+            user_db_id=user_db_id,
+            tg_user_id=user_id_tg,
         )
-        pid = db.add_payment(
-            acc_id, user_db_id, user_id_tg, amount,
-            socia_inv_id=qris.get("socia_inv_id", ""),
-            qris_chat_id=str(event.chat_id),
-            qris_message_id=str(sent.id) if hasattr(sent, "id") else "",
-        )
-        # naikkan stage ke payment_pending biar gak kirim QRIS ke-2
-        db.advance_stage(user_db_id, "payment_pending")
-        logger.info("[%s] QRIS #%s dikirim ke %s (inv %s)", account.get("name"), pid, user_name, qris.get("socia_inv_id"))
-    except Exception as e:
-        logger.error("Gagal kirim QRIS ke user: %s", e)
 
 
 async def _handle_revisi(account, event):
@@ -229,7 +199,9 @@ async def run_account(account):
     """Jalankan 1 client account, blok sampai disconnect."""
     api_id = account.get("api_id") or int(os.getenv("TELEGRAM_API_ID", "0"))
     api_hash = account.get("api_hash") or os.getenv("TELEGRAM_API_HASH", "")
-    client = TelegramClient(account["session_file"], api_id, api_hash)
+    from core.utils import get_session_path
+    session_path = get_session_path(account["session_file"])
+    client = TelegramClient(session_path, api_id, api_hash)
     acc = dict(account)
     try:
         @client.on(events.NewMessage)
@@ -272,3 +244,4 @@ async def run_all():
     await asyncio.sleep(3)
     logger.info("Account yang berhasil login: %d/%d", len(CLIENTS), len(accounts))
     return CLIENTS
+

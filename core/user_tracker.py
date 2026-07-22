@@ -21,7 +21,7 @@ Sales funnel (stage) — makin ke kanan makin "panas":
 """
 import re
 import logging
-import db
+from . import db
 
 logger = logging.getLogger("UserTracker")
 

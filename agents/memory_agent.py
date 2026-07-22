@@ -3,8 +3,7 @@ import json
 import re
 import logging
 from typing import Dict, Any, List, Tuple
-import db
-import user_tracker
+from core import db, user_tracker
 from .base import ContextData, MemoryData
 
 logger = logging.getLogger("MemoryAgent")

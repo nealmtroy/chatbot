@@ -143,6 +143,23 @@ def init_db():
             FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS packages (
+            code                TEXT PRIMARY KEY,
+            name                TEXT NOT NULL,
+            vip_chat_id         TEXT DEFAULT '',
+            amount              INTEGER NOT NULL DEFAULT 50000,
+            invite_expire_hours INTEGER DEFAULT 24,
+            active              INTEGER NOT NULL DEFAULT 1,
+            created_at          TEXT NOT NULL,
+            updated_at          TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+            key                 TEXT PRIMARY KEY,
+            value               TEXT NOT NULL,
+            updated_at          TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_users_account ON users(account_id);
         CREATE INDEX IF NOT EXISTS idx_users_tgid ON users(tg_user_id);
         CREATE INDEX IF NOT EXISTS idx_messages_account_user ON messages(account_id, user_id);
@@ -151,6 +168,17 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(tg_user_id, status);
         """
     )
+    # Alter accounts if columns don't exist yet
+    try:
+        c.execute("ALTER TABLE accounts ADD COLUMN package_code TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        c.execute("ALTER TABLE accounts ADD COLUMN added_by_tg_id INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     logger.info("DB siap: %s", DB_FILE)
 
@@ -478,6 +506,97 @@ def update_payment(payment_id, **fields):
 
 
 # ---------------------------------------------------------------------------
+# PACKAGES & SETTINGS (VIP Packages & Management Bot Config)
+# ---------------------------------------------------------------------------
+def add_package(code, name, vip_chat_id="", amount=50000, invite_expire_hours=24, bot_username=""):
+    now = _now()
+    code_clean = code.strip().lower()
+    clean_bot = str(bot_username).strip().lstrip("@")
+    try:
+        get_conn().execute(
+            """INSERT INTO packages (code, name, vip_chat_id, amount, invite_expire_hours, bot_username, active, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+               ON CONFLICT(code) DO UPDATE SET
+                 name=excluded.name,
+                 vip_chat_id=excluded.vip_chat_id,
+                 amount=excluded.amount,
+                 invite_expire_hours=excluded.invite_expire_hours,
+                 bot_username=excluded.bot_username,
+                 active=1,
+                 updated_at=excluded.updated_at""",
+            (code_clean, name.strip(), str(vip_chat_id), int(amount), int(invite_expire_hours), clean_bot, now, now),
+        )
+    except Exception:
+        # Fallback if bot_username column not present in SQLite table
+        get_conn().execute(
+            """INSERT INTO packages (code, name, vip_chat_id, amount, invite_expire_hours, active, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+               ON CONFLICT(code) DO UPDATE SET
+                 name=excluded.name,
+                 vip_chat_id=excluded.vip_chat_id,
+                 amount=excluded.amount,
+                 invite_expire_hours=excluded.invite_expire_hours,
+                 active=1,
+                 updated_at=excluded.updated_at""",
+            (code_clean, name.strip(), str(vip_chat_id), int(amount), int(invite_expire_hours), now, now),
+        )
+    get_conn().commit()
+    return code_clean
+
+
+def list_packages(active_only=True, bot_username=None):
+    sql = "SELECT * FROM packages WHERE 1=1"
+    params = []
+    if active_only:
+        sql += " AND active=1"
+    if bot_username:
+        clean = str(bot_username).strip().lstrip("@")
+        try:
+            sql += " AND (bot_username=? OR bot_username='' OR bot_username IS NULL)"
+            params.append(clean)
+        except Exception:
+            pass
+    sql += " ORDER BY code ASC"
+    rows = get_conn().execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_package(code):
+    row = get_conn().execute("SELECT * FROM packages WHERE code=?", (code.strip().lower(),)).fetchone()
+    return dict(row) if row else None
+
+
+def delete_package(code):
+    get_conn().execute("UPDATE packages SET active=0, updated_at=? WHERE code=?", (_now(), code.strip().lower()))
+    get_conn().commit()
+
+
+def set_setting(key, value):
+    now = _now()
+    get_conn().execute(
+        """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+        (str(key), str(value), now),
+    )
+    get_conn().commit()
+
+
+def get_setting(key, default=""):
+    row = get_conn().execute("SELECT value FROM settings WHERE key=?", (str(key),)).fetchone()
+    return row["value"] if row else default
+
+
+def delete_account(account_id):
+    get_conn().execute("DELETE FROM accounts WHERE id=?", (account_id,))
+    get_conn().commit()
+
+
+def set_account_package(account_id, package_code):
+    get_conn().execute("UPDATE accounts SET package_code=? WHERE id=?", (package_code.strip().lower(), account_id))
+    get_conn().commit()
+
+
+# ---------------------------------------------------------------------------
 # MIGRASI dari JSON lama (best-effort, idempoten)
 # ---------------------------------------------------------------------------
 def migrate_from_json_legacy():
@@ -490,7 +609,7 @@ def migrate_from_json_legacy():
     """
     conn = get_conn()
     # Pastikan account default ada
-    acc = get_conn().execute("SELECT * FROM accounts WHERE name LIKE 'Alya'").fetchone()
+    acc = get_conn().execute("SELECT * FROM accounts LIMIT 1").fetchone()
     if not acc:
         # ambil creds dari env
         import os as _os
@@ -498,8 +617,9 @@ def migrate_from_json_legacy():
         _ld()
         api_id = int(_os.getenv("TELEGRAM_API_ID", "0"))
         api_hash = _os.getenv("TELEGRAM_API_HASH", "")
+        default_name = _os.getenv("DEFAULT_ACCOUNT_NAME", "Alya")
         acc_id = add_account(
-            name="Alya", session_file="ai_userbot_session",
+            name=default_name, session_file="ai_userbot_session",
             api_id=api_id, api_hash=api_hash,
             city="Bandung", age=21, bio="mahasiswi dkv",
         )

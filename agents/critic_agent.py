@@ -64,7 +64,7 @@ def strip_formatting_and_limit_emojis(text: str) -> str:
     text = re.sub(r'</?(b|i|code|pre|a|em|strong)>', '', text, flags=re.IGNORECASE)
     text = re.sub(r'^\s*[*•-]\s*', '', text, flags=re.MULTILINE)
     text = re.sub(r'\*([^*]+)\*', r'\1', text)
-    text = re.sub(r'_([^_]+)_', r'\1', text)
+    text = re.sub(r'(?<!\w)_([^_]+)_(?!\w)', r'\1', text)
 
     emojis = EMOJI_PATTERN.findall(text)
     if len(emojis) > 1:
@@ -82,6 +82,7 @@ class CriticAgent:
     Tujuan: Menjadi editor terakhir sebelum pesan dikirim.
     Pemeriksaan & Tindakan:
     - Stripping tag <think>
+    - Protect [ACTION: ...] tag agar tidak terdistorsi/terlower-case
     - Cegat & auto-rewrite jika terdeteksi refusal AI / CS (seperti 'obrolan kayak gitu nggak nyaman')
     - Batasi kebiasaan kapitalisasi (lowercase kecuali tawa)
     - Batasi emoji (maksimal 1 per percakapan)
@@ -111,6 +112,14 @@ class CriticAgent:
                 edits_applied=["empty_fallback"],
                 is_valid=True
             )
+
+        # 0. Protect [ACTION: ...] tags from lowercasing and markdown stripping
+        action_tags = re.findall(r'\[ACTION:\s*[A-Z0-9_]+\]', text, flags=re.IGNORECASE)
+        token_map = {}
+        for idx, tag in enumerate(action_tags):
+            token = f"ACTIONTOKENXYZ{idx}"
+            token_map[token] = tag.upper()
+            text = text.replace(tag, token, 1)
 
         # 1. Strip <think> tag
         stripped_think = _strip_think(text)
@@ -196,6 +205,12 @@ class CriticAgent:
         # Rebuild criticized_text from bubbles agar konsisten
         # (bubble bisa skip line karena emoji dedup di atas)
         final_text = "\n".join(b["text"] for b in bubbles) if bubbles else text
+
+        # Restore protected action tags
+        for token, orig_tag in token_map.items():
+            final_text = final_text.replace(token.lower(), orig_tag).replace(token, orig_tag)
+            for b in bubbles:
+                b["text"] = b["text"].replace(token.lower(), orig_tag).replace(token, orig_tag)
 
         return CriticResult(
             criticized_text=final_text,

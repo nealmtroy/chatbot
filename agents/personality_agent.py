@@ -1,7 +1,7 @@
 import os
 import logging
 from typing import Dict, Any, List
-import db
+from core import db
 from .base import ContextData, MemoryData, PersonalityData
 
 logger = logging.getLogger("PersonalityAgent")
@@ -97,7 +97,7 @@ class PersonalityAgent:
         # RAG Knowledge Facts dari Memory
         if memory.facts:
             retrieved_text = "\n".join([f"- {fact}" for fact in memory.facts])
-            facts_prompt = f"\n[RELEVANT_KNOWLEDGE_FACTS]\nFakta tentang kamu yang wajib dipakai menjawab:\n{retrieved_text}\n"
+            facts_prompt = f"\n[RELEVANT_KNOWLEDGE_FACTS]\nGunakan informasi fakta berikut sebagai referensi pengetahuan kamu (tetap jawab secara alami, ringkas, santai, dan tidak kaku/oversharing):\n{retrieved_text}\n"
             system_prompt_parts.append(facts_prompt.strip())
 
         # Contoh Pola Bahasa & Fakta dari Memory (chat_history.json)

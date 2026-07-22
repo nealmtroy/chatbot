@@ -18,8 +18,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional
 
-import clients
-import db
+from core import clients, db
 from .base import ContextData, MemoryData, StageResult
 
 logger = logging.getLogger("StageAgent")
