@@ -1911,11 +1911,23 @@ MENU_TEXT_MAP.update(
 )
 
 
+from telegram.request import HTTPXRequest
+from telegram.error import TimedOut, NetworkError
+
+def get_httpx_request():
+    return HTTPXRequest(
+        connect_timeout=30.0,
+        read_timeout=30.0,
+        write_timeout=30.0,
+        pool_timeout=30.0,
+    )
+
+
 # --- APPLICATION BUILDER ---
 def build_application():
     load_env()
     token = os.getenv("MANAGE_BOT_TOKEN", "").strip() or MANAGE_TOKEN
-    app = Application.builder().token(token).build()
+    app = Application.builder().token(token).request(get_httpx_request()).build()
 
     fallback_handlers = [
         MessageHandler(
@@ -2135,16 +2147,29 @@ async def start_manage_bot():
 
     app = build_application()
     logger.info("Manage bot (ReplyKeyboardMarkup & Inline Interactive) jalan...")
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling(drop_pending_updates=True)
+    
+    for attempt in range(1, 11):
+        try:
+            await app.initialize()
+            await app.start()
+            await app.updater.start_polling(drop_pending_updates=True)
+            break
+        except (TimedOut, NetworkError) as err:
+            logger.warning("Inisialisasi ManageBot ke Telegram API gagal (percobaan %d/10): %s. Retrying dalam 3s...", attempt, err)
+            if attempt == 10:
+                logger.error("Gagal terhubung ke Telegram Bot API setelah 10 percobaan.")
+                return
+            await asyncio.sleep(3)
+
     try:
         while True:
             await asyncio.sleep(3600)
     except (asyncio.CancelledError, KeyboardInterrupt):
         logger.info("Manage bot dihentikan secara normal.")
-        await app.updater.stop()
-        await app.stop()
+        if app.updater and app.updater.running:
+            await app.updater.stop()
+        if app.running:
+            await app.stop()
         await app.shutdown()
     except Exception as exc:
         logger.error("Error pada manage bot: %s", exc, exc_info=True)
