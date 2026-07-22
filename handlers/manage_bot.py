@@ -1922,7 +1922,9 @@ def get_httpx_request():
 
 # --- APPLICATION BUILDER ---
 def build_application():
-    app = Application.builder().token(MANAGE_TOKEN).request(get_httpx_request()).build()
+    load_env()
+    token = os.getenv("MANAGE_BOT_TOKEN", "").strip() or MANAGE_TOKEN
+    app = Application.builder().token(token).request(get_httpx_request()).build()
 
     fallback_handlers = [
         MessageHandler(
@@ -2134,7 +2136,9 @@ def build_application():
 
 
 async def start_manage_bot():
-    if not MANAGE_TOKEN:
+    load_env()
+    token = os.getenv("MANAGE_BOT_TOKEN", "").strip() or MANAGE_TOKEN
+    if not token:
         logger.warning("MANAGE_BOT_TOKEN kosong, manage bot gak jalan.")
         return
 

@@ -11,16 +11,17 @@ menjadi `from env_loader import load_env; load_env()`.
 import os
 from dotenv import load_dotenv
 
-_PARENT_ENV = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-_LOCAL_ENV = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-
-
 def load_env():
-    """Load parent .env dulu (sociabuzz-pay), lalu local .env sebagai override."""
-    # Parent dulu (set semua var sociabuzz-pay + SOCIABUZZ_USERNAME, dll)
-    if os.path.exists(_PARENT_ENV):
-        load_dotenv(_PARENT_ENV, override=False)
-    # Local (chatbot/.env) override kalau ada var yg beda
-    if os.path.exists(_LOCAL_ENV):
-        load_dotenv(_LOCAL_ENV, override=True)
-    return _PARENT_ENV
+    """Load root .env (chatbot/.env) dengan override=True agar perubahan di .env langsung berlaku."""
+    core_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(core_dir)
+    
+    root_env = os.path.join(root_dir, ".env")
+    if os.path.exists(root_env):
+        load_dotenv(root_env, override=True)
+        
+    parent_env = os.path.join(os.path.dirname(root_dir), ".env")
+    if os.path.exists(parent_env):
+        load_dotenv(parent_env, override=False)
+        
+    return root_env

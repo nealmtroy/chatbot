@@ -83,7 +83,7 @@ async def start_bot():
         if token in _RUNNING_BOT_TOKENS:
             continue
         _RUNNING_BOT_TOKENS.add(token)
-        session_name = "vip_bot" if idx == 0 else f"vip_bot_{idx}"
+        session_name = f"vip_bot_{abs(hash(token)) % 10000}"
         task = asyncio.create_task(
             start_single_bot(token, session_name, config, store, _GLOBAL_QRIS_SEMAPHORE, _GLOBAL_USER_LOCKS, _GLOBAL_WITHDRAWAL_STATES)
         )
