@@ -55,12 +55,10 @@ def _get_api_keys_for_provider(base_env_name: str) -> List[Tuple[str, str]]:
     Returns list of (key_name, key_value).
     """
     keys = []
-    # 1. Base key first
     base_val = os.getenv(base_env_name, "").strip()
     if base_val:
         keys.append((base_env_name, base_val))
     
-    # 2. Look for indexed or named variants (e.g. OPENROUTER_API_KEY_1, OPENROUTER_API_KEY_2)
     suffix_candidates = []
     prefix = base_env_name + "_"
     for env_k, env_v in os.environ.items():
@@ -86,12 +84,10 @@ class DigitalTwinAgent:
         self.data_dir = data_dir
         self.provider_targets = []
 
-        # Load active providers and multiple keys from .env
         for p_name, cfg in PROVIDERS_CONFIG.items():
             base_env = cfg["api_key_env"]
             api_keys = _get_api_keys_for_provider(base_env)
             
-            # Special handling for local Ollama
             if not api_keys and p_name == "ollama" and os.getenv(cfg["model_env"]):
                 api_keys = [("OLLAMA_LOCAL", "ollama")]
 
@@ -120,7 +116,6 @@ class DigitalTwinAgent:
                         })
 
         if not self.provider_targets:
-            # Fallback warning instead of crash if env not configured yet
             print("⚠️ Warning: Tidak ada API Key LLM Provider yang aktif di .env!")
 
         self.rag = ChromaRAGEngine(data_dir)
@@ -140,7 +135,7 @@ class DigitalTwinAgent:
         self.rag.clear_all()
 
     def _extract_thinking_and_clean_answer(self, text: str) -> tuple[str, str]:
-        """Extract thinking/reasoning into debug string and return clean final answer."""
+        """Extract thinking/reasoning into debug string and return clean final answer without emojis/tilde hallucination."""
         thinking_parts = []
         clean_text = text.strip()
 
@@ -181,32 +176,39 @@ class DigitalTwinAgent:
         if final_answer.startswith('"') and final_answer.endswith('"') and len(final_answer) > 2:
             final_answer = final_answer[1:-1].strip()
 
+        # Clean trailing tildes ~ or weird markdown fluff if present
+        final_answer = final_answer.replace("~", "").strip()
+
         debug_thinking = "\n".join(thinking_parts).strip()
         return debug_thinking, (final_answer if final_answer else clean_text)
 
-    def generate_response(self, user_input: str, conversation_history: list = None) -> str:
-        """Generate response matching exact WhatsApp export conversation flow and typing style (Sync)."""
+    def _build_system_prompt(self, user_input: str) -> str:
         rag_context = self.rag.get_context_for_prompt(user_input, top_k=3)
         formatted_rag_context = self.template_mgr.replace_placeholders(rag_context)
         
         bot_name = self.template_mgr.config.get("bot_name", "Intan")
         pricelist_template = self.template_mgr.get_pricelist_template()
 
-        system_prompt = (
+        return (
             f"Kamu adalah AI Persona / Digital Twin dengan nama '{bot_name}'.\n"
             "TUGAS UTAMA: Jawab pertanyaan atau ajakan obrolan dengan MENIRU 100% GAYA BAHASA, "
             "KOSA KATA, DAN RITME NGETIK (Reply) berdasarkan referensi riwayat chat export WhatsApp berikut.\n\n"
             f"{formatted_rag_context}\n\n"
             f"TEMPLATE PRICELIST RESMI KAMU:\n{pricelist_template}\n\n"
-            "ATURAN KETAT:\n"
-            "1. JANGAN PERNAH terdengar seperti AI formal, bot, atau customer service.\n"
-            "2. JANGAN PERNAH MENULISKAN PROSES BERPIKIR / ANALISIS / CHAIN-OF-THOUGHT DI HASIL AKHIR BALASAN.\n"
-            "3. Tirulah alur respon 'reply' sesuai contoh riwayat obrolan di atas.\n"
-            "4. Jika pada contoh riwayat obrolan user menggunakan 2 balasan, "
-            "kamu JUGA harus memisahkan balasanmu menjadi 2 baris (enter) sesuai ritme khas user mebutuhkannya.\n"
-            "5. Jawaban harus santai, natural, dan sesuai gaya penulisan asli user.\n"
-            "6. Jika user menanyakan daftar harga / pricelist / list harga, KIRIMKAN TEMPLATE PRICELIST RESMI di atas secara persis."
+            "ATURAN KETAT DAN ABSOLUT:\n"
+            "1. DILARANG MENGGUNAKAN EMOJI SAMA SEKALI (JANGAN GUNAKAN 🤭, 😊, 🫣, DLL) KECUALI JIKA ADA DI REFERENSI CHAT EXPORT WHATSAPP DI ATAS.\n"
+            "2. DILARANG MENGGUNAKAN SIMBOL TILDE ('~') ATAU ALAY/LEBAY CUST SERVICE.\n"
+            "3. DILARANG TERDENGAR SEPERTI CS/BOT ALAY (seperti 'nanti aku kirim no rekening', 'aku temenin sampe puas~'). METODE PEMBAYARAN KITA ADALAH QRIS!\n"
+            "4. JANGAN PERNAH MENULISKAN PROSES BERPIKIR / ANALISIS / CHAIN-OF-THOUGHT DI HASIL AKHIR BALASAN.\n"
+            "5. Tirulah alur respon 'reply' sesuai contoh riwayat obrolan di atas.\n"
+            "6. Jika pada contoh riwayat obrolan user menggunakan 2 balasan, kamu JUGA harus memisahkan balasanmu menjadi 2 baris (enter) sesuai ritme khas user.\n"
+            "7. Jawaban harus santai, natural, singkat, dan sesuai gaya penulisan asli user.\n"
+            "8. Jika user menanyakan daftar harga / pricelist / list harga, KIRIMKAN TEMPLATE PRICELIST RESMI di atas secara persis."
         )
+
+    def generate_response(self, user_input: str, conversation_history: list = None) -> str:
+        """Generate response matching exact WhatsApp export conversation flow and typing style (Sync)."""
+        system_prompt = self._build_system_prompt(user_input)
 
         messages = [{"role": "system", "content": system_prompt}]
         
@@ -262,27 +264,7 @@ class DigitalTwinAgent:
 
     async def generate_response_async(self, user_input: str, conversation_history: list = None) -> str:
         """Generate response matching exact WhatsApp export conversation flow asynchronously."""
-        rag_context = self.rag.get_context_for_prompt(user_input, top_k=3)
-        formatted_rag_context = self.template_mgr.replace_placeholders(rag_context)
-        
-        bot_name = self.template_mgr.config.get("bot_name", "Intan")
-        pricelist_template = self.template_mgr.get_pricelist_template()
-
-        system_prompt = (
-            f"Kamu adalah AI Persona / Digital Twin dengan nama '{bot_name}'.\n"
-            "TUGAS UTAMA: Jawab pertanyaan atau ajakan obrolan dengan MENIRU 100% GAYA BAHASA, "
-            "KOSA KATA, DAN RITME NGETIK (Reply) berdasarkan referensi riwayat chat export WhatsApp berikut.\n\n"
-            f"{formatted_rag_context}\n\n"
-            f"TEMPLATE PRICELIST RESMI KAMU:\n{pricelist_template}\n\n"
-            "ATURAN KETAT:\n"
-            "1. JANGAN PERNAH terdengar seperti AI formal, bot, atau customer service.\n"
-            "2. JANGAN PERNAH MENULISKAN PROSES BERPIKIR / ANALISIS / CHAIN-OF-THOUGHT DI HASIL AKHIR BALASAN.\n"
-            "3. Tirulah alur respon 'reply' sesuai contoh riwayat obrolan di atas.\n"
-            "4. Jika pada contoh riwayat obrolan user menggunakan 2 balasan, "
-            "kamu JUGA harus memisahkan balasanmu menjadi 2 baris (enter) sesuai ritme khas user mebutuhkannya.\n"
-            "5. Jawaban harus santai, natural, dan sesuai gaya penulisan asli user.\n"
-            "6. Jika user menanyakan daftar harga / pricelist / list harga, KIRIMKAN TEMPLATE PRICELIST RESMI di atas secara persis."
-        )
+        system_prompt = self._build_system_prompt(user_input)
 
         messages = [{"role": "system", "content": system_prompt}]
         
