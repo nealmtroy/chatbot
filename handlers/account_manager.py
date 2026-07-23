@@ -115,24 +115,35 @@ async def handle_message(account, event):
 
         # Format lines into bubbles
         raw_lines = [l.strip() for l in ai_response.split("\n") if l.strip()]
-        cleaned_lines = []
-        for line in raw_lines:
-            if line.lower().startswith("reply:"):
-                line = line[6:].strip()
-            if line:
-                cleaned_lines.append(line)
-
-        if not cleaned_lines:
-            cleaned_lines = [ai_response]
-
-        # Check if any line in the response is the QRIS trigger
+        
+        # Check if any line in the response contains the QRIS trigger pattern
         has_qris_trigger = False
         qris_index = -1
-        for idx, line in enumerate(cleaned_lines):
-            if "(media qris)" in line.lower() or "(media_qris)" in line.lower():
-                has_qris_trigger = True
-                qris_index = idx
-                break
+        
+        # Regex to match placeholders like (media qris), (kirim gambar qris), [foto qris], etc.
+        qris_pattern = re.compile(r'[\(\[][^\)\]]*qris[^\)\]]*[\)\]]', re.IGNORECASE)
+        
+        cleaned_lines = []
+        for idx, line in enumerate(raw_lines):
+            if line.lower().startswith("reply:"):
+                line = line[6:].strip()
+            
+            if line:
+                match = qris_pattern.search(line)
+                if match:
+                    has_qris_trigger = True
+                    qris_index = idx
+                    line = qris_pattern.sub("", line).strip()
+                    line = re.sub(r'\s+', ' ', line)
+                
+                if line:
+                    cleaned_lines.append(line)
+                else:
+                    if qris_index == -1 or qris_index == idx:
+                        qris_index = len(cleaned_lines)
+
+        if not cleaned_lines and not has_qris_trigger:
+            cleaned_lines = [ai_response]
 
         # Handle QRIS generation if triggered
         if has_qris_trigger:
@@ -178,7 +189,8 @@ async def handle_message(account, event):
                 buyer_invoice_id = public_invoice_id()
                 
                 # Send bubbles before QRIS
-                for i in range(qris_index):
+                send_limit = min(qris_index, len(cleaned_lines)) if qris_index >= 0 else len(cleaned_lines)
+                for i in range(send_limit):
                     line = cleaned_lines[i]
                     delay = round(min(max(len(line) * 0.04, 0.4), 1.5), 1)
                     async with event.client.action(event.chat_id, "typing"):
@@ -229,13 +241,14 @@ async def handle_message(account, event):
                 )
                 
                 # Send bubbles after QRIS
-                for i in range(qris_index + 1, len(cleaned_lines)):
-                    line = cleaned_lines[i]
-                    delay = round(min(max(len(line) * 0.04, 0.4), 1.5), 1)
-                    async with event.client.action(event.chat_id, "typing"):
-                        await asyncio.sleep(delay)
-                    await event.respond(line)
-                    logger.info("[%s] reply ke %s: %s", account["name"], user_name, line)
+                if qris_index >= 0 and qris_index < len(cleaned_lines):
+                    for i in range(qris_index, len(cleaned_lines)):
+                        line = cleaned_lines[i]
+                        delay = round(min(max(len(line) * 0.04, 0.4), 1.5), 1)
+                        async with event.client.action(event.chat_id, "typing"):
+                            await asyncio.sleep(delay)
+                        await event.respond(line)
+                        logger.info("[%s] reply ke %s: %s", account["name"], user_name, line)
                     
             except Exception as exc:
                 logger.exception("Failed to generate and send QRIS for user tg=%s: %s", user_id_tg, exc)
