@@ -177,7 +177,7 @@ async def _handle_revisi(account, event):
 
 
 async def start_account(account):
-    session_name = account.get("session_name")
+    session_name = account.get("session_name") or account.get("session_file")
     api_id = account.get("api_id") or os.getenv("TELEGRAM_API_ID")
     api_hash = account.get("api_hash") or os.getenv("TELEGRAM_API_HASH")
 
