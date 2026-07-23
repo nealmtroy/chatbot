@@ -452,6 +452,20 @@ async def send_log(client, config, store, text, **kwargs):
 
 
 async def safe_send_user(client, config, store, user_id, text, **kwargs):
+    # Try sending via userbots first so it appears directly in their chat with the girl
+    try:
+        from handlers.account_manager import CLIENTS as userbot_clients
+        for ub_client in list(userbot_clients.values()):
+            try:
+                entity = await ub_client.get_entity(user_id)
+                await ub_client.send_message(entity, text, **kwargs)
+                LOGGER.info("Successfully delivered message to user %s via userbot client", user_id)
+                return "sent"
+            except Exception:
+                continue
+    except Exception as e:
+        LOGGER.warning("Failed userbot delivery lookup: %s", e)
+
     if not client:
         return "error"
     try:

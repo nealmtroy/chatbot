@@ -97,6 +97,49 @@ async def handle_message(account, event):
             if content:
                 conversation_history.append({"role": role, "content": content})
 
+        # Get latest payment status to make the AI context-aware of payment state
+        try:
+            from vip_bot.config import load_config
+            from vip_bot.db_store import PaymentStore
+            
+            vip_config = load_config()
+            payment_store = PaymentStore(vip_config)
+            latest_payment = await asyncio.to_thread(payment_store.latest_payment_for_user, user_id_tg)
+            
+            if latest_payment:
+                status = latest_payment.get("status")
+                amount_str = f"Rp {int(latest_payment.get('amount') or 0):,}".replace(",", ".")
+                pkg_name = latest_payment.get("package_name") or "VIP"
+                
+                if status == "pending":
+                    system_instruction = (
+                        f"[SYSTEM INFO: Status pembayaran user saat ini adalah PENDING / BELUM DIBAYAR "
+                        f"untuk nominal {amount_str} ({pkg_name}). "
+                        f"Jika user bertanya 'sudah masuk belum', 'sudah bayar', atau mengaku sudah membayar padahal belum terdeteksi, "
+                        f"jelaskan dengan santai/casual bahwa pembayarannya masih belum terdeteksi oleh sistem "
+                        f"dan minta mereka menunggu sebentar atau pastikan nominal transfer sudah pas.]"
+                    )
+                elif status in {"paid", "processing_paid", "processing_delivery"}:
+                    system_instruction = (
+                        f"[SYSTEM INFO: Status pembayaran user saat ini adalah PAID / SUDAH DIBAYAR LUNAS "
+                        f"untuk nominal {amount_str} ({pkg_name}). "
+                        f"Jika user menanyakan status atau konfirmasi, beri tahu dengan senang/flirty bahwa pembayaran "
+                        f"sudah sukses terverifikasi! (Jika ini VCS, katakan bahwa kamu akan segera hubungi/panggil mereka).]"
+                    )
+                elif status in {"timeout", "expired"}:
+                    system_instruction = (
+                        f"[SYSTEM INFO: Status pembayaran user saat ini adalah EXPIRED / KEDALUWARSA. "
+                        f"Jika user menanyakan status pembayaran atau ingin bayar, beri tahu mereka bahwa QRIS sebelumnya "
+                        f"sudah kedaluwarsa/mati, dan minta mereka bilang jika ingin dikirimkan QRIS baru lagi.]"
+                    )
+                else:
+                    system_instruction = None
+                    
+                if system_instruction:
+                    conversation_history.append({"role": "system", "content": system_instruction})
+        except Exception as e:
+            logger.warning("Gagal menyematkan status pembayaran ke prompt: %s", e)
+
         # --- Generate Response directly from DigitalTwinAgent ---
         if clients.digital_twin_agent is None:
             logger.error("DigitalTwinAgent is not initialized!")

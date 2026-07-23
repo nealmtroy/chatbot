@@ -962,3 +962,20 @@ class PaymentStore:
                 "refund rejected withdrawal",
             )
         return withdrawal
+
+    def latest_payment_for_user(self, user_id):
+        if self.use_postgres:
+            sql = f"SELECT * FROM {self.table} WHERE user_id = %s ORDER BY id DESC LIMIT 1"
+            return self._pg_query(sql, (int(user_id),), fetchone=True)
+        if not self.client:
+            return None
+        query = (
+            self.client.table(self.table)
+            .select("*")
+            .eq("user_id", user_id)
+            .order("id", desc=True)
+            .limit(1)
+        )
+        response = self._execute(query, "latest payment for user")
+        return response.data[0] if response and response.data else None
+

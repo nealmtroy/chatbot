@@ -219,9 +219,9 @@ async def poll_once(client, config, store, payment):
                 config,
                 store,
                 payment["user_id"],
-                invalid_payment_message(),
+                invalid_payment_message(payment.get("package_name") or "VIP"),
                 parse_mode="html",
-                buttons=package_buttons(config, store),
+                buttons=package_buttons(config, store) if "vcs" not in (payment.get("package_code") or "").lower() else None,
             )
             await send_log(
                 client,
@@ -301,9 +301,9 @@ async def expire_pending_payment(client, config, store, payment, title="Payment 
         config,
         store,
         payment["user_id"],
-        timeout_payment_message(),
+        timeout_payment_message(payment.get("package_name") or "VIP"),
         parse_mode="html",
-        buttons=package_buttons(config, store),
+        buttons=package_buttons(config, store) if "vcs" not in (payment.get("package_code") or "").lower() else None,
     )
     is_custom = not (payment.get("package_code") or payment.get("package_name"))
     if is_custom:

@@ -96,7 +96,14 @@ def paid_message_buttons(payment):
     return [[Button.url(f"Buka {package_name}", url)]]
 
 
-def invalid_payment_message():
+def invalid_payment_message(package_name="VIP"):
+    safe_package_name = html.escape(package_name)
+    if "vcs" in safe_package_name.lower():
+        return (
+            "⚠️ <b>QRIS VCS sebelumnya sudah tidak aktif</b>\n\n"
+            "QRIS VCS yang tadi sudah kedaluwarsa / mati kakk 🥺\n"
+            "Jangan di-scan lagi yaa. Kalau mau lanjut VCS-nya, chat aku lagi biar dibuatin QRIS baru! 🫣"
+        )
     return (
         "⚠️ <b>QRIS sebelumnya sudah tidak aktif</b>\n\n"
         "Slot VIP kamu masih bisa diamankan. Buat QRIS baru sekarang, selesaikan pembayaran 1 kali, "
@@ -104,7 +111,14 @@ def invalid_payment_message():
     )
 
 
-def timeout_payment_message():
+def timeout_payment_message(package_name="VIP"):
+    safe_package_name = html.escape(package_name)
+    if "vcs" in safe_package_name.lower():
+        return (
+            "⏳ <b>QRIS VCS Kamu sudah expired kakk</b>\n\n"
+            "Yah kakk, QRIS pembayaran VCS yang tadi sudah kedaluwarsa (expired) 🥺\n"
+            "Jangan di-scan lagi yaa kakk. Kalau mau lanjut VCS-nya, kabari aku biar aku buatin QRIS yang baru lagi kakk! 🫣❤️"
+        )
     return (
         "⏳ <b>Invoice VIP sudah kedaluwarsa</b>\n\n"
         "QRIS lama sudah ditutup supaya tidak salah scan. Klik tombol di bawah untuk checkout ulang "
