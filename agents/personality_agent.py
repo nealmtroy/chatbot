@@ -43,6 +43,15 @@ class PersonalityAgent:
         sales_prompt = load_prompt_file("sales.txt", base_dir=prompts_dir)
         slang_prompt = load_prompt_file("slang.txt", base_dir=prompts_dir)
 
+        # Inject harga paket aktif secara dinamis dari DB
+        try:
+            packages = db.list_packages(active_only=True)
+            if packages:
+                pkg_info = ", ".join([f"{p['name']}: Rp {p['amount']:,}".replace(",", ".") for p in packages])
+                sales_prompt += f"\n\n[INFORMASI HARGA PAKET AKTIF SAAT INI]\n- {pkg_info}\nSelalu gunakan daftar harga paket aktif resmi di atas jika menyebutkan harga VIP!"
+        except Exception as e:
+            logger.warning(f"Gagal memuat paket aktif dari DB: {e}")
+
         # Ambil koreksi dari DB (.revisi)
         corrections = []
         try:

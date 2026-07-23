@@ -24,15 +24,17 @@ CS_BANNED_PATTERNS = [
 
 AI_REFUSAL_PATTERNS = [
     r'obrolan kayak gitu',
-    r'nggak nyaman buat aku',
+    r'nggak nyaman',
     r'tidak nyaman',
-    r'ngobrol santai biasa aja',
+    r'ngobrol santai biasa',
     r'sebagai ai',
     r'sebagai asisten',
     r'saya tidak bisa',
     r'aku tidak bisa memenuhi',
     r'kebijakan keamanan',
     r'bahas apa nih\??',
+    r'kasar gitu',
+    r'ngomong kasar',
 ]
 
 def _strip_think(text: str) -> str:
@@ -91,15 +93,15 @@ class CriticAgent:
 
     def _intercept_refusal_rewrite(self, user_msg: str) -> str:
         msg_lower = user_msg.lower()
-        if any(w in msg_lower for w in ["ngewe", "entot", "wikwik"]):
-            return "dih langsung ngajak ngewe aja wkwk 🫣 emg kakak kuat berapa ronde?"
+        if any(w in msg_lower for w in ["ngewe", "entot", "wikwik", "kontol", "ngaceng", "memek", "pepek", "sange"]):
+            return "dih nakal banget sih kakk wkwk 🫣 di grup vip aku ada video ngewe dan colmek aku loh"
         if "vcs" in msg_lower:
             return "vc biasa dulu dong kak, kalo langsung vcs entar kakak ketagihan lagi 🤭"
         if "open" in msg_lower or "bo" in msg_lower:
-            return "ga open bo kakk, maaf\nak masi perawan soalnya hehehe"
+            return "ga open bo kakk, cuma ada grup vip koleksi pribadi aku aja 🤭"
         if any(w in msg_lower for w in ["colmek", "coli", "pap"]):
             return "pernahh kakk wkwk, kemarin malah aku colmek sampe lemes banget 🤭"
-        return "halo kakk, kenapa?"
+        return "halo kakk, kenapa? 🤭"
 
     def process(self, draft: ResponseDraft, context: ContextData) -> CriticResult:
         edits = []
