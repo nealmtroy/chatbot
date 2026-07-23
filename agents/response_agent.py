@@ -13,10 +13,10 @@ async def _call_api_with_retry(messages, max_retries=3):
             response = await clients.client.chat.completions.create(
                 model=clients.active_model,
                 messages=messages,
-                temperature=0.7,
-                presence_penalty=0.6,
-                frequency_penalty=0.5,
-                max_tokens=500
+                temperature=0.85,
+                presence_penalty=0.4,
+                frequency_penalty=0.3,
+                max_tokens=300
             )
             return response
         except Exception as e:
