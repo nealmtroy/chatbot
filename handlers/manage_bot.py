@@ -769,6 +769,9 @@ async def add_acc_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         aid = db.add_account(name, session_file, api_id, api_hash, city=city, age=age)
+        from handlers import account_manager
+        await account_manager.start_account_by_id(aid)
+
         txt = (
             f"🎉 *AKUN '{name}' TERHUBUNG & LOGIN BERHASIL! (# {aid})*\n\n"
             f"📌 *Data Akun:*\n"
@@ -777,7 +780,7 @@ async def add_acc_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Kota: {city or '-'}\n"
             f"• Umur: {age or '-'}\n\n"
             f"✅ File session telah terbuat dan ter-login di server!\n"
-            f"Silakan restart service bot `sociabuzz-pay` agar akun ini langsung aktif melayani chat."
+            f"🚀 *AKUN SUDAH OTOMATIS AKTIF!* Akun ini langsung aktif melayani chat tanpa perlu restart service."
         )
         await update.message.reply_text(txt, parse_mode="Markdown", reply_markup=MAIN_MENU_KEYBOARD)
     except Exception as e:
@@ -826,6 +829,12 @@ async def cb_toggle_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.get_conn().execute("UPDATE accounts SET active=? WHERE id=?", (new_active, aid))
     db.get_conn().commit()
 
+    from handlers import account_manager
+    if new_active:
+        await account_manager.start_account_by_id(aid)
+    else:
+        await account_manager.stop_account_by_id(aid)
+
     # refresh list
     accs = db.list_accounts(active_only=False)
     btns = []
@@ -834,10 +843,9 @@ async def cb_toggle_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action = "Matikan ❌" if ac["active"] else "Aktifkan ✅"
         btns.append([InlineKeyboardButton(f"#{ac['id']} {ac['name']} ({st}) ➔ {action}", callback_data=f"tog_{ac['id']}")])
 
-    status_str = "AKTIF 🟢" if new_active else "NONAKTIF 🔴"
+    status_str = "AKTIF 🟢 (Otomatis Berjalan 🚀)" if new_active else "NONAKTIF 🔴 (Otomatis Dihentikan 🛑)"
     txt = (
-        f"✅ Status akun *#{aid} {a['name']}* berhasil diubah menjadi *{status_str}*.\n"
-        f"_(Catatan: Restart bot `sociabuzz-pay` di VPS jika mengubah status akun Telethon)._\n\n"
+        f"✅ Status akun *#{aid} {a['name']}* berhasil diubah menjadi *{status_str}*.\n\n"
         f"🔄 *SWITCH ON/OFF AKUN CHATBOT*:"
     )
     await query.edit_message_text(txt, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(btns))

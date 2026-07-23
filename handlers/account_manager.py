@@ -231,6 +231,44 @@ async def run_account(account):
             pass
 
 
+RUNNING_TASKS = {}  # account_id -> asyncio.Task
+
+
+async def start_account_by_id(account_id: int):
+    """Start 1 account dynamically without restarting the bot process."""
+    account = db.get_account(account_id)
+    if not account or not account.get("active"):
+        logger.warning("Account #%s tidak aktif / tidak ditemukan.", account_id)
+        return False
+
+    task = RUNNING_TASKS.get(account_id)
+    if task and not task.done():
+        logger.info("Account #%s (%s) sudah berjalan.", account_id, account.get("name"))
+        return True
+
+    new_task = asyncio.create_task(run_account(account))
+    RUNNING_TASKS[account_id] = new_task
+    logger.info("🚀 Account [%s] (#%s) berhasil di-start otomatis tanpa restart!", account.get("name"), account_id)
+    return True
+
+
+async def stop_account_by_id(account_id: int):
+    """Stop 1 account dynamically without restarting the bot process."""
+    client = CLIENTS.pop(account_id, None)
+    if client:
+        try:
+            await client.disconnect()
+        except Exception as e:
+            logger.warning("Gagal disconnect account #%s: %s", account_id, e)
+
+    task = RUNNING_TASKS.pop(account_id, None)
+    if task and not task.done():
+        task.cancel()
+
+    logger.info("🛑 Account #%s dihentikan secara otomatis.", account_id)
+    return True
+
+
 async def run_all():
     """Jalankan semua account aktif sebagai background task. Return map account_id->client."""
     accounts = db.list_accounts(active_only=True)
@@ -239,7 +277,9 @@ async def run_all():
         return CLIENTS
     logger.info("Menjalankan %d account...", len(accounts))
     for a in accounts:
-        asyncio.create_task(run_account(a))  # fire-and-forget, run_until_disconnected blok di task sendiri
+        aid = a["id"]
+        if aid not in RUNNING_TASKS or RUNNING_TASKS[aid].done():
+            RUNNING_TASKS[aid] = asyncio.create_task(run_account(a))
     # Beri waktu sebentar biar account sempat login & isi CLIENTS
     await asyncio.sleep(3)
     logger.info("Account yang berhasil login: %d/%d", len(CLIENTS), len(accounts))
