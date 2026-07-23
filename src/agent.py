@@ -180,7 +180,7 @@ class DigitalTwinAgent:
         debug_thinking = "\n".join(thinking_parts).strip()
         return debug_thinking, (final_answer if final_answer else clean_text)
 
-    def generate_response(self, user_input: str, conversation_history: list = None) -> str:
+    def generate_response(self, user_input: str, conversation_history: list = None, system_instruction: str = None) -> str:
         """Generate response matching exact WhatsApp export conversation flow and typing style."""
         rag_context = self.rag.get_context_for_prompt(user_input, top_k=3)
         formatted_rag_context = self.template_mgr.replace_placeholders(rag_context)
@@ -194,6 +194,12 @@ class DigitalTwinAgent:
             "KOSA KATA, DAN RITME NGETIK (Reply) berdasarkan referensi riwayat chat export WhatsApp berikut.\n\n"
             f"{formatted_rag_context}\n\n"
             f"TEMPLATE PRICELIST RESMI KAMU:\n{pricelist_template}\n\n"
+        )
+        
+        if system_instruction:
+            system_prompt += f"{system_instruction}\n\n"
+
+        system_prompt += (
             "ATURAN KETAT:\n"
             "1. JANGAN PERNAH terdengar seperti AI formal, bot, atau customer service.\n"
             "2. JANGAN PERNAH MENULISKAN PROSES BERPIKIR / ANALISIS / CHAIN-OF-THOUGHT DI HASIL AKHIR BALASAN.\n"

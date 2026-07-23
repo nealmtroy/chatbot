@@ -93,11 +93,18 @@ async def handle_message(account, event):
         # Exclude the current incoming message which is the first one in the list (index 0)
         for msg in reversed(tg_history[1:]):
             role = "assistant" if msg.out else "user"
-            content = msg.text or ""
-            if content:
-                conversation_history.append({"role": role, "content": content})
+            content = (msg.text or "").strip()
+            if not content:
+                continue
+            
+            # Skip any assistant message that contains system/rule keywords to prevent repeating leaked rules
+            if role == "assistant" and ("ATURAN KETAT" in content or "JANGAN PERNAH" in content or "Tirulah alur" in content):
+                continue
+                
+            conversation_history.append({"role": role, "content": content})
 
         # Get latest payment status to make the AI context-aware of payment state
+        system_instruction = None
         try:
             from vip_bot.config import load_config
             from vip_bot.db_store import PaymentStore
@@ -132,8 +139,6 @@ async def handle_message(account, event):
                         f"Jika user menanyakan status pembayaran atau ingin bayar, beri tahu mereka bahwa QRIS sebelumnya "
                         f"sudah kedaluwarsa/mati, dan minta mereka bilang jika ingin dikirimkan QRIS baru lagi.]"
                     )
-                else:
-                    system_instruction = None
             else:
                 # No payment history at all
                 system_instruction = (
@@ -142,9 +147,6 @@ async def handle_message(account, event):
                     "katakan dengan santai/casual bahwa mereka belum minta QRIS-nya sama sekali "
                     "dan tawarkan untuk mengirimkan QRIS jika mereka mau melakukan pembayaran.]"
                 )
-                
-            if system_instruction:
-                conversation_history.append({"role": "system", "content": system_instruction})
         except Exception as e:
             logger.warning("Gagal menyematkan status pembayaran ke prompt: %s", e)
 
@@ -157,7 +159,8 @@ async def handle_message(account, event):
             ai_response = await asyncio.to_thread(
                 clients.digital_twin_agent.generate_response,
                 user_input=message_text,
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
+                system_instruction=system_instruction
             )
 
         if not ai_response:
