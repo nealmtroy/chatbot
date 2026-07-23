@@ -86,8 +86,8 @@ async def handle_message(account, event):
         except Exception as e:
             logger.warning("mark-read gagal: %s", e)
 
-        # Get conversation history directly from Telegram (last 6 messages)
-        tg_history = await event.client.get_messages(event.chat_id, limit=6)
+        # Get conversation history directly from Telegram (last 40 messages)
+        tg_history = await event.client.get_messages(event.chat_id, limit=40)
         conversation_history = []
         
         # Exclude the current incoming message which is the first one in the list (index 0)
