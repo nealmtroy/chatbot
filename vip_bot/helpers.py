@@ -86,7 +86,7 @@ def parse_iso_datetime(raw):
         except ValueError:
             return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        parsed = parsed.replace(tzinfo=WIB)
     return parsed.astimezone(dt.timezone.utc)
 
 
@@ -127,7 +127,7 @@ def adaptive_poll_delay(created_at, expires_at, attempts=0, error=""):
 def next_poll_at(created_at, expires_at, attempts=0, error=""):
     delay = adaptive_poll_delay(created_at, expires_at, attempts=attempts, error=error)
     if delay is None:
-        return None
+        return utc_now_iso()
     return (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=delay)).replace(microsecond=0).isoformat()
 
 

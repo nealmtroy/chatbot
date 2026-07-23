@@ -256,7 +256,7 @@ class PaymentStore:
                 self.client.table(self.table)
                 .select("*")
                 .eq("status", status)
-                .lte("next_check_at", due_before)
+                .or_(f"next_check_at.lte.{due_before},next_check_at.is.null")
                 .order("next_check_at", desc=False)
                 .order("id", desc=False)
                 .limit(limit)

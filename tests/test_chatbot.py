@@ -454,4 +454,22 @@ def test_memory_agent_retrieves_chat_examples():
     assert "masih perawan" in mem.facts
 
 
+def test_parse_iso_datetime_defaults_naive_to_wib():
+    from vip_bot.helpers import parse_iso_datetime
+    import datetime as dt
+
+    # Naive date string from SociaBuzz WIB
+    parsed = parse_iso_datetime("2026-07-23 18:47:08")
+    assert parsed is not None
+    # 18:47:08 WIB equals 11:47:08 UTC
+    assert parsed.hour == 11
+    assert parsed.minute == 47
+    assert parsed.second == 8
+
+    # Comparing naive string 18:47:08 WIB at 18:53:00 WIB (11:53:00 UTC)
+    now_utc = dt.datetime(2026, 7, 23, 11, 53, 0, tzinfo=dt.timezone.utc)
+    assert parsed <= now_utc
+
+
+
 
