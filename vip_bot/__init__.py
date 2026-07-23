@@ -16,38 +16,8 @@ _GLOBAL_WITHDRAWAL_STATES = {}
 _RUNNING_BOT_TOKENS = set()
 
 
-import os
-
-def get_session_path(session_name: str) -> str:
-    if not session_name:
-        session_name = "default"
-
-    session_dir = "sessions"
-    os.makedirs(session_dir, exist_ok=True)
-
-    basename = os.path.basename(session_name)
-    if basename.endswith(".session"):
-        clean_name = basename[:-8]
-    else:
-        clean_name = basename
-
-    target_path = os.path.join(session_dir, clean_name)
-
-    root_session = clean_name + ".session"
-    target_session = target_path + ".session"
-
-    if os.path.exists(root_session) and not os.path.exists(target_session):
-        try:
-            os.rename(root_session, target_session)
-            if os.path.exists(root_session + "-journal"):
-                os.rename(root_session + "-journal", target_session + "-journal")
-        except Exception:
-            pass
-
-    return target_path
-
-
 async def start_single_bot(bot_token, session_name, config, store, qris_semaphore, user_locks, withdrawal_states):
+    from core.utils import get_session_path
     session_path = get_session_path(session_name)
     client = TelegramClient(session_path, config.api_id, config.api_hash)
     register_handlers(client, config, store, qris_semaphore, user_locks, withdrawal_states)
