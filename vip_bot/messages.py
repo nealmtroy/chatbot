@@ -68,6 +68,13 @@ def custom_qris_caption(inv_id, checkout_amount, final_amount, expires, user):
 
 def paid_message(invite_link, package_name="VIP", invite_hours=24, group_url=""):
     safe_package_name = html.escape(package_name)
+    if invite_link == "VCS_PAID" or "vcs" in safe_package_name.lower() or not str(invite_link).startswith("http"):
+        return (
+            "✅ <b>Pembayaran berhasil terdeteksi</b>\n\n"
+            f"Terima kasih kakk! Pembayaran untuk <b>{safe_package_name}</b> sudah masuk.\n"
+            "Aku akan segera hubungi kamu buat mulai yaa, tunggu sebentar kakk! 🫣❤️"
+        )
+
     safe_group_url = html.escape(group_url or "")
     group_link = f'<a href="{safe_group_url}">Buka {safe_package_name}</a>' if safe_group_url else f"Buka {safe_package_name}"
     return (

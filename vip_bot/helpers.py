@@ -537,6 +537,10 @@ async def delete_qris_message(client, payment):
 
 
 async def create_invite_link(client, config, store, payment):
+    package_code = (payment.get("package_code") or "").lower()
+    if "vcs" in package_code:
+        return "VCS_PAID", None
+
     vip_chat_id = int(payment.get("vip_chat_id") or 0) or runtime_vip_chat_id(config, store)
     if not vip_chat_id:
         raise RuntimeError("VIP chat belum di-set. Admin perlu set paket atau pakai /setvip <chat_id>.")

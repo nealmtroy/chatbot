@@ -1,5 +1,6 @@
 import os
 import re
+import io
 import asyncio
 import random
 import logging
@@ -14,6 +15,22 @@ logger = logging.getLogger("AccountManager")
 CLIENTS = {}
 AUTO_REPLY = {}  # account_id -> bool
 USER_PROCESSING = set()  # set of (acc_id, chat_id)
+
+
+def parse_amount_from_text(text: str, default_amount: int = 100000) -> int:
+    text_clean = text.lower().replace(".", "").replace(",", "")
+    # Match patterns like "100k", "50k", "100.000", "50.000", "100ribu", "50 ribu"
+    match_k = re.search(r'(\d+)\s*(k|ribu|rb)', text_clean)
+    if match_k:
+        val = int(match_k.group(1))
+        if val < 1000:
+            return val * 1000
+        return val
+    # Direct number match
+    match_num = re.search(r'(\d{4,6})', text_clean)
+    if match_num:
+        return int(match_num.group(1))
+    return default_amount
 
 
 async def handle_message(account, event):
@@ -108,23 +125,144 @@ async def handle_message(account, event):
         if not cleaned_lines:
             cleaned_lines = [ai_response]
 
-        # Send as message bubbles with natural delays
-        for line in cleaned_lines:
-            delay = round(min(max(len(line) * 0.04, 0.4), 1.5), 1)
-            async with event.client.action(event.chat_id, "typing"):
-                await asyncio.sleep(delay)
+        # Check if any line in the response is the QRIS trigger
+        has_qris_trigger = False
+        qris_index = -1
+        for idx, line in enumerate(cleaned_lines):
+            if "(media qris)" in line.lower() or "(media_qris)" in line.lower():
+                has_qris_trigger = True
+                qris_index = idx
+                break
+
+        # Handle QRIS generation if triggered
+        if has_qris_trigger:
+            combined_text = " ".join(cleaned_lines) + " " + message_text
+            amount = parse_amount_from_text(combined_text, default_amount=100000)
+            
+            # Determine if it's VCS or VIP
+            is_vcs = any("vcs" in l.lower() for l in cleaned_lines) or "vcs" in message_text.lower()
+            note_prefix = "VCS" if is_vcs else "VIP"
+            
+            logger.info("Triggered QRIS creation for user tg=%s, amount=%s, type=%s", user_id_tg, amount, note_prefix)
+            
+            from vip_bot.config import load_config
+            from vip_bot.db_store import PaymentStore
+            from vip_bot.helpers import create_qris_with_retries_sync, public_invoice_id, SociaBuzzError
+            
+            vip_config = load_config()
+            payment_store = PaymentStore(vip_config)
+            
             try:
-                await event.respond(line)
-                logger.info("[%s] reply ke %s: %s", account["name"], user_name, line)
-            except FloodWaitError as e:
-                logger.warning("FloodWait %ss", e.seconds)
-                await asyncio.sleep(e.seconds)
+                # Generate QRIS using the thread executor
+                (
+                    _session,
+                    buyer_name,
+                    buyer_email,
+                    order_id,
+                    payment_url,
+                    qris,
+                    qr_bytes,
+                    checkout_amount,
+                ) = await asyncio.to_thread(
+                    create_qris_with_retries_sync,
+                    vip_config,
+                    sender,
+                    amount,
+                    note_prefix
+                )
+                
+                socia_invoice_id = qris.get("inv_id")
+                if not socia_invoice_id:
+                    raise SociaBuzzError(f"QRIS response missing inv_id: {qris}")
+                
+                buyer_invoice_id = public_invoice_id()
+                
+                # Send bubbles before QRIS
+                for i in range(qris_index):
+                    line = cleaned_lines[i]
+                    delay = round(min(max(len(line) * 0.04, 0.4), 1.5), 1)
+                    async with event.client.action(event.chat_id, "typing"):
+                        await asyncio.sleep(delay)
+                    await event.respond(line)
+                    logger.info("[%s] reply ke %s: %s", account["name"], user_name, line)
+                
+                # Send actual QRIS image file
+                qr_file = io.BytesIO(qr_bytes)
+                qr_file.name = f"{buyer_invoice_id}.png"
+                
+                logger.info("[%s] sending QRIS file to %s...", account["name"], user_name)
+                
+                from vip_bot.messages import qris_caption
+                package = {"code": note_prefix.lower(), "name": note_prefix, "amount": checkout_amount}
+                expires = qris.get("data", {}).get("countdown") or ""
+                
+                caption = qris_caption(
+                    package,
+                    buyer_invoice_id,
+                    checkout_amount,
+                    qris.get("data", {}).get("amount") or "",
+                    expires
+                )
+                
+                invoice_msg = await event.client.send_file(
+                    event.chat_id,
+                    file=qr_file,
+                    caption=caption,
+                    parse_mode="html"
+                )
+                
+                # Register payment to Postgres/Supabase database
+                await asyncio.to_thread(
+                    payment_store.create_payment,
+                    user=sender,
+                    public_invoice_id=buyer_invoice_id,
+                    order_id=order_id,
+                    payment_url=payment_url,
+                    inv_id=socia_invoice_id,
+                    amount=checkout_amount,
+                    buyer_name=buyer_name,
+                    buyer_email=buyer_email,
+                    qris_data=qris,
+                    qris_chat_id=event.chat_id,
+                    qris_message_id=invoice_msg.id,
+                    package=package
+                )
+                
+                # Send bubbles after QRIS
+                for i in range(qris_index + 1, len(cleaned_lines)):
+                    line = cleaned_lines[i]
+                    delay = round(min(max(len(line) * 0.04, 0.4), 1.5), 1)
+                    async with event.client.action(event.chat_id, "typing"):
+                        await asyncio.sleep(delay)
+                    await event.respond(line)
+                    logger.info("[%s] reply ke %s: %s", account["name"], user_name, line)
+                    
+            except Exception as exc:
+                logger.exception("Failed to generate and send QRIS for user tg=%s: %s", user_id_tg, exc)
+                # Fallback to plain text bubbles if QRIS generation fails
+                for line in cleaned_lines:
+                    delay = round(min(max(len(line) * 0.04, 0.4), 1.5), 1)
+                    async with event.client.action(event.chat_id, "typing"):
+                        await asyncio.sleep(delay)
+                    await event.respond(line)
+        else:
+            # Send standard message bubbles
+            for line in cleaned_lines:
+                delay = round(min(max(len(line) * 0.04, 0.4), 1.5), 1)
+                async with event.client.action(event.chat_id, "typing"):
+                    await asyncio.sleep(delay)
                 try:
                     await event.respond(line)
+                    logger.info("[%s] reply ke %s: %s", account["name"], user_name, line)
+                except FloodWaitError as e:
+                    logger.warning("FloodWait %ss", e.seconds)
+                    await asyncio.sleep(e.seconds)
+                    try:
+                        await event.respond(line)
+                    except Exception as ex:
+                        logger.error("gagal kirim bubble setelah floodwait: %s", ex)
                 except Exception as ex:
-                    logger.error("gagal kirim bubble setelah floodwait: %s", ex)
-            except Exception as ex:
-                logger.error("gagal kirim bubble: %s", ex)
+                    logger.error("gagal kirim bubble: %s", ex)
     finally:
         USER_PROCESSING.discard(user_key)
 
