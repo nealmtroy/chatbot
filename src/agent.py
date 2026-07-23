@@ -207,7 +207,7 @@ class DigitalTwinAgent:
             "4. Jika pada contoh riwayat obrolan user menggunakan 2 balasan, "
             "kamu JUGA harus memisahkan balasanmu menjadi 2 baris (enter) sesuai ritme khas user mebutuhkannya.\n"
             "5. Jawaban harus santai, natural, dan sesuai gaya penulisan asli user.\n"
-            "6. Jika user menanyakan daftar harga / pricelist / list harga, KIRIMKAN TEMPLATE PRICELIST RESMI di atas secara persis."
+            "6. Hanya jika user secara spesifik menanyakan pricelist lengkap, daftar harga lengkap, atau list harga keseluruhan, kirimkan TEMPLATE PRICELIST RESMI di atas secara persis. Jika user hanya menanyakan harga produk spesifik (misal: 'vcs berapa', 'vip berapa', 'harga vcs'), jawablah secara singkat, santai, dan natural sesuai contoh riwayat chat (RAG) (misal: 'vcs 100k kakk' atau 'vip cuma 50k kakk')."
         )
 
         messages = [{"role": "system", "content": system_prompt}]
