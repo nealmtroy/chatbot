@@ -17,6 +17,19 @@ AUTO_REPLY = {}  # account_id -> bool
 USER_PROCESSING = set()  # set of (acc_id, chat_id)
 
 
+def to_math_bold_italic(text: str) -> str:
+    out = []
+    for c in text:
+        o = ord(c)
+        if 65 <= o <= 90:  # A-Z
+            out.append(chr(o - 65 + 0x1D4D0))
+        elif 97 <= o <= 122:  # a-z
+            out.append(chr(o - 97 + 0x1D4EA))
+        else:
+            out.append(c)
+    return "".join(out)
+
+
 def parse_amount_from_text(text: str, default_amount: int = 100000) -> int:
     text_clean = text.lower().replace(".", "").replace(",", "")
     # Match patterns like "100k", "50k", "100.000", "50.000", "100ribu", "50 ribu"
@@ -170,7 +183,18 @@ async def handle_message(account, event):
         # Format lines into bubbles (keep pricelist intact as a single bubble)
         is_pricelist = any(kw in ai_response.lower() for kw in ["pricelist", "daftar harga", "vcs —", "vcs -", "vip group"])
         if is_pricelist:
-            raw_lines = [ai_response.strip()]
+            # Overwrite with the pristine template to ensure exact spacing and newlines
+            pricelist_text = clients.digital_twin_agent.template_mgr.get_pricelist_template()
+            bot_name_config = clients.digital_twin_agent.template_mgr.config.get("bot_name", "Intan")
+            active_bot_name = account.get("name", "Intan").capitalize()
+            stylized_active_name = to_math_bold_italic(active_bot_name)
+            
+            # Case-insensitively replace the name in the header/body
+            if bot_name_config.lower() == "intan" and active_bot_name.lower() != "intan":
+                pricelist_text = re.sub(re.escape(bot_name_config), stylized_active_name, pricelist_text, flags=re.IGNORECASE)
+                pricelist_text = re.sub(r'Intan', stylized_active_name, pricelist_text, flags=re.IGNORECASE)
+                
+            raw_lines = [pricelist_text.strip()]
         else:
             raw_lines = [l.strip() for l in ai_response.split("\n") if l.strip()]
         
