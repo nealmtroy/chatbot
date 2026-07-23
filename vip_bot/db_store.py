@@ -31,6 +31,7 @@ class PaymentStore:
             self.client = create_client(config.supabase_url, config.supabase_service_role_key)
         else:
             self.client = None
+            LOGGER.error("⚠️ SUPABASE IS NOT CONFIGURED! SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are empty in .env. Payment tracking and expiration will NOT work!")
         self.query_retries = max(1, env_int("SUPABASE_QUERY_RETRIES", 3))
         self.retry_base_delay = max(0.1, float(os_getenv_wrapper("SUPABASE_RETRY_BASE_DELAY", "0.35")))
 
@@ -74,6 +75,7 @@ class PaymentStore:
         referral=None,
     ):
         if not self.client:
+            LOGGER.error("Cannot save payment %s: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are empty in .env!", public_invoice_id)
             return
         from vip_bot.helpers import utc_now_iso, parse_iso_datetime, next_poll_at, display_name
         import datetime as dt
