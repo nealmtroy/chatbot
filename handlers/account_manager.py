@@ -204,23 +204,12 @@ async def handle_message(account, event):
                 
                 logger.info("[%s] sending QRIS file to %s...", account["name"], user_name)
                 
-                from vip_bot.messages import qris_caption
                 package = {"code": note_prefix.lower(), "name": note_prefix, "amount": checkout_amount}
-                expires = qris.get("data", {}).get("countdown") or ""
-                
-                caption = qris_caption(
-                    package,
-                    buyer_invoice_id,
-                    checkout_amount,
-                    qris.get("data", {}).get("amount") or "",
-                    expires
-                )
                 
                 invoice_msg = await event.client.send_file(
                     event.chat_id,
                     file=qr_file,
-                    caption=caption,
-                    parse_mode="html"
+                    caption=None
                 )
                 
                 # Register payment to Postgres/Supabase database
