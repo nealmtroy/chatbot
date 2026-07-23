@@ -167,8 +167,12 @@ async def handle_message(account, event):
             logger.warning(f"Gagal mendapatkan respon dari DigitalTwinAgent untuk user {user_name}")
             return
 
-        # Format lines into bubbles
-        raw_lines = [l.strip() for l in ai_response.split("\n") if l.strip()]
+        # Format lines into bubbles (keep pricelist intact as a single bubble)
+        is_pricelist = any(kw in ai_response.lower() for kw in ["pricelist", "daftar harga", "vcs —", "vcs -", "vip group"])
+        if is_pricelist:
+            raw_lines = [ai_response.strip()]
+        else:
+            raw_lines = [l.strip() for l in ai_response.split("\n") if l.strip()]
         
         # Check if any line in the response contains the QRIS trigger pattern
         has_qris_trigger = False
