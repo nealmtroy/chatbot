@@ -201,8 +201,8 @@ async def start_account(account):
         AUTO_REPLY[acc_id] = True
 
         @client.on(events.NewMessage)
-        def _on_msg(evt):
-            asyncio.create_task(handle_message(account, evt))
+        async def _on_msg(evt):
+            await handle_message(account, evt)
 
         logger.info("✅ Account %s (%s) aktif & listening.", account["name"], session_name)
         return client
