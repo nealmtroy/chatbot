@@ -134,9 +134,17 @@ async def handle_message(account, event):
                     )
                 else:
                     system_instruction = None
-                    
-                if system_instruction:
-                    conversation_history.append({"role": "system", "content": system_instruction})
+            else:
+                # No payment history at all
+                system_instruction = (
+                    "[SYSTEM INFO: User saat ini BELUM PERNAH membuat tagihan atau QRIS sama sekali. "
+                    "Jika user mengaku sudah membayar atau mengonfirmasi pembayaran, "
+                    "katakan dengan santai/casual bahwa mereka belum minta QRIS-nya sama sekali "
+                    "dan tawarkan untuk mengirimkan QRIS jika mereka mau melakukan pembayaran.]"
+                )
+                
+            if system_instruction:
+                conversation_history.append({"role": "system", "content": system_instruction})
         except Exception as e:
             logger.warning("Gagal menyematkan status pembayaran ke prompt: %s", e)
 
