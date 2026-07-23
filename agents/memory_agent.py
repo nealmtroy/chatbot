@@ -3,12 +3,11 @@ import json
 import re
 import logging
 from typing import Dict, Any, List, Tuple
-from core import db, user_tracker
+from core import db, user_tracker, clients
 from .base import ContextData, MemoryData
 
 logger = logging.getLogger("MemoryAgent")
 
-# Cache per-file: {filepath: {"data": ..., "mtime": ...}}
 _knowledge_file_cache: Dict[str, Any] = {}
 _history_file_cache: Dict[str, Any] = {}
 
@@ -16,9 +15,9 @@ _history_file_cache: Dict[str, Any] = {}
 class MemoryAgent:
     """
     2. Memory Agent
-    Tujuan: Mengingat seluruh informasi penting yang pernah diketahui mengenai
-    lawan bicara maupun pemilik akun (short-term & long-term memory).
-    Membaca fakta & pola bahasa dari knowledge.json, chat_history.json, dan DB.
+    Tujuan: Mengingat seluruh informasi penting (short-term & long-term memory).
+    Membaca fakta & pola bahasa dari knowledge.json, data/my_chat_history.json,
+    ChromaDB Vector RAG Engine (ai-testing), dan DB.
     """
 
     def retrieve_relevant_knowledge(self, message_text: str, knowledge_file: str, account_id: int) -> List[str]:
@@ -42,9 +41,6 @@ class MemoryAgent:
         except Exception:
             pass
 
-        if not all_entries:
-            return []
-
         matched_facts = []
         message_lower = message_text.lower()
         for item in all_entries:
@@ -54,11 +50,22 @@ class MemoryAgent:
                     matched_facts.append(item.get("fact"))
                     break
 
+        # Query ChromaDB RAG Engine dari src/rag_engine.py (ai-testing)
+        if clients.digital_twin_agent and hasattr(clients.digital_twin_agent, "rag"):
+            try:
+                rag_context = clients.digital_twin_agent.rag.get_context_for_prompt(message_text, top_k=2)
+                if rag_context and "Belum ada riwayat chat export" not in rag_context:
+                    matched_facts.append(f"ChromaDB RAG Reference:\n{rag_context}")
+            except Exception as e:
+                logger.debug(f"ChromaDB RAG query error: {e}")
+
         return matched_facts
 
-    def retrieve_relevant_chat_examples(self, message_text: str, history_file: str = "chat_history.json") -> Tuple[List[Dict[str, Any]], List[str]]:
+    def retrieve_relevant_chat_examples(self, message_text: str, history_file: str = "data/my_chat_history.json") -> Tuple[List[Dict[str, Any]], List[str]]:
         candidates = [
             history_file,
+            "my_chat_history.json",
+            "chat_history.json",
             os.path.join("telegram-chatbot", history_file)
         ]
         entries = []
@@ -79,23 +86,36 @@ class MemoryAgent:
                         entries = json.load(f)
                     _history_file_cache[target_path] = {"data": entries, "mtime": mtime}
             except Exception as e:
-                logger.debug(f"Error reading chat_history.json: {e}")
+                logger.debug(f"Error reading chat history file ({target_path}): {e}")
 
         matched_examples = []
         extra_facts = []
         msg_lower = message_text.lower()
 
-        import re
         for item in entries:
-            keywords = item.get("keywords", [])
-            for kw in keywords:
-                kw_clean = kw.lower().strip()
-                if kw_clean and re.search(rf'\b{re.escape(kw_clean)}\b', msg_lower):
-                    matched_examples.append(item)
-                    for f in item.get("facts", []):
-                        if f not in extra_facts:
-                            extra_facts.append(f)
-                    break
+            # Handle structured sessions from my_chat_history.json
+            if "messages" in item:
+                msgs = item.get("messages", [])
+                partner = item.get("partner_name", "")
+                full_text = " ".join([m.get("text", "") for m in msgs]).lower()
+                if any(word in full_text for word in msg_lower.split() if len(word) > 3):
+                    user_msgs = [m.get("text") for m in msgs if m.get("sender") == partner]
+                    my_replies = [m.get("text") for m in msgs if m.get("sender") == "reply"]
+                    if user_msgs and my_replies:
+                        matched_examples.append({
+                            "user": " / ".join(user_msgs),
+                            "replies": my_replies
+                        })
+            else:
+                keywords = item.get("keywords", [])
+                for kw in keywords:
+                    kw_clean = kw.lower().strip()
+                    if kw_clean and re.search(rf'\b{re.escape(kw_clean)}\b', msg_lower):
+                        matched_examples.append(item)
+                        for f in item.get("facts", []):
+                            if f not in extra_facts:
+                                extra_facts.append(f)
+                        break
 
         return matched_examples, extra_facts
 
@@ -117,12 +137,10 @@ class MemoryAgent:
         matched_facts = self.retrieve_relevant_knowledge(context.message_text, knowledge_file, account_id)
         matched_examples, extra_facts = self.retrieve_relevant_chat_examples(context.message_text)
 
-        # Merge extra facts from chat history
         for ef in extra_facts:
             if ef not in matched_facts:
                 matched_facts.append(ef)
 
-        # Inisialisasi memory data
         memory = MemoryData(
             nickname=context.sender or "Teman",
             relationship="Pelanggan/Teman" if stage != "new" else "Kenalan Baru",
@@ -138,14 +156,8 @@ class MemoryAgent:
         return memory
 
     def update_memory_after_conversation(self, context: ContextData, reply_text: str):
-        """Memperbarui memori di DB setelah percakapan selesai.
-        
-        Catatan: stage detection sudah ditangani oleh StageAgent di pipeline,
-        jadi tidak perlu update stage dari reply text di sini.
-        """
         if not context.user_db_id:
             return
-        # Profile enrichment dari reply (kalau AI menyebut info user)
         try:
             user_tracker.enrich_from_message(context.user_db_id, reply_text)
         except Exception as e:

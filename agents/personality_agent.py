@@ -1,8 +1,9 @@
 import os
 import logging
 from typing import Dict, Any, List
-from core import db
+from core import db, clients
 from .base import ContextData, MemoryData, PersonalityData
+from src.templates import TemplateManager
 
 logger = logging.getLogger("PersonalityAgent")
 
@@ -29,26 +30,40 @@ class PersonalityAgent:
     3. Personality Agent
     Tujuan: Menjaga agar semua jawaban tetap terdengar seperti pemilik akun (Digital Clone).
     Agent ini menyusun aturan persona, larangan, sales, slang, koreksi DB, dan Anti-Refusal Directives.
+    Diintegrasikan dengan TemplateManager dari ai-testing (data/persona.json).
     """
 
     def process(self, context: ContextData, memory: MemoryData, prompts_dir: str = PROMPTS_DIR) -> PersonalityData:
         account = context.account
         account_id = account.get("id", 0)
-        acc_name = account.get("name", "Intan")
+        
+        # Load TemplateManager dari ai-testing
+        template_mgr = None
+        if clients.digital_twin_agent and hasattr(clients.digital_twin_agent, "template_mgr"):
+            template_mgr = clients.digital_twin_agent.template_mgr
+        else:
+            data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+            template_mgr = TemplateManager(data_dir)
+
+        acc_name = account.get("name") or template_mgr.config.get("bot_name", "Intan")
         persona_file = account.get("persona_file", "prompts/persona.txt")
 
-        # Load file-file prompt secara robust
+        # Load file-file prompt
         persona_prompt = load_prompt_file(persona_file, base_dir=prompts_dir)
         larangan_prompt = load_prompt_file("larangan.txt", base_dir=prompts_dir)
         sales_prompt = load_prompt_file("sales.txt", base_dir=prompts_dir)
         slang_prompt = load_prompt_file("slang.txt", base_dir=prompts_dir)
 
-        # Inject harga paket aktif secara dinamis dari DB
+        # Ambil template pricelist resmi dari TemplateManager (ai-testing)
+        official_pricelist = template_mgr.get_pricelist_template()
+        sales_prompt += f"\n\n[TEMPLATE PRICELIST RESMI DARI PERSONA.JSON]\n{official_pricelist}\n"
+
+        # Inject harga paket aktif secara dinamis dari DB jika ada
         try:
             packages = db.list_packages(active_only=True)
             if packages:
                 pkg_info = ", ".join([f"{p['name']}: Rp {p['amount']:,}".replace(",", ".") for p in packages])
-                sales_prompt += f"\n\n[INFORMASI HARGA PAKET AKTIF SAAT INI]\n- {pkg_info}\nSelalu gunakan daftar harga paket aktif resmi di atas jika menyebutkan harga VIP!"
+                sales_prompt += f"\n\n[INFORMASI HARGA PAKET DB AKTIF]\n- {pkg_info}\n"
         except Exception as e:
             logger.warning(f"Gagal memuat paket aktif dari DB: {e}")
 
@@ -79,7 +94,6 @@ class PersonalityAgent:
 - gaya_ngobrol: {memory.chat_habit}
 """
 
-        # Stage-aware instruction — atur kapan boleh jualan vs ngobrol santai
         stage_instructions = {
             "new": "User baru pertama kali chat. Sapa balik dengan ramah dan genit, JANGAN langsung nawarin pricelist/VIP/VCS.",
             "greeted": "User sudah sapa. Ngobrol santai, JANGAN langsung nawarin pricelist kecuali user yang nanya duluan.",
@@ -92,7 +106,6 @@ class PersonalityAgent:
         if stage_prompt:
             parameter_prompt += f"- stage_saat_ini: {memory.user_stage}\n- instruksi_stage: {stage_prompt}\n"
 
-        # Assembled System Prompt
         system_prompt_parts = [anti_refusal_prompt.strip()]
         if persona_prompt:
             system_prompt_parts.append(persona_prompt.strip())
@@ -105,22 +118,19 @@ class PersonalityAgent:
 
         system_prompt_parts.append(parameter_prompt.strip())
 
-        # RAG Knowledge Facts dari Memory
         if memory.facts:
             retrieved_text = "\n".join([f"- {fact}" for fact in memory.facts])
-            facts_prompt = f"\n[RELEVANT_KNOWLEDGE_FACTS]\nGunakan informasi fakta berikut sebagai referensi pengetahuan kamu (tetap jawab secara alami, ringkas, santai, dan tidak kaku/oversharing):\n{retrieved_text}\n"
+            facts_prompt = f"\n[RELEVANT_KNOWLEDGE_FACTS]\nGunakan informasi fakta berikut sebagai referensi pengetahuan kamu:\n{retrieved_text}\n"
             system_prompt_parts.append(facts_prompt.strip())
 
-        # Contoh Pola Bahasa & Fakta dari Memory (chat_history.json)
         if memory.chat_examples:
             examples_text = "\n[POLA_BAHASA_DAN_CONTOH_CHAT_MEMORY]\nGunakan contoh pola gaya bahasa asli berikut saat merespons:\n"
             for ex in memory.chat_examples:
                 user_q = ex.get("user", "")
-                replies = " / ".join(ex.get("replies", []))
+                replies = " / ".join(ex.get("replies", [])) if isinstance(ex.get("replies"), list) else str(ex.get("replies", ""))
                 examples_text += f'- User: "{user_q}" -> Reply Asli: "{replies}"\n'
             system_prompt_parts.append(examples_text.strip())
 
-        # Check if assistant's last message in history already contains VIP sales pitch
         last_assistant_msg = ""
         for m in reversed(context.last_messages):
             if m.get("role") == "assistant":
@@ -136,7 +146,9 @@ class PersonalityAgent:
 """
             system_prompt_parts.append(anti_repetition_prompt.strip())
 
-        final_system_prompt = "\n\n".join(system_prompt_parts)
+        raw_system_prompt = "\n\n".join(system_prompt_parts)
+        # Terapkan replace_placeholders dari TemplateManager (ai-testing)
+        final_system_prompt = template_mgr.replace_placeholders(raw_system_prompt)
 
         personality = PersonalityData(
             account_name=acc_name,
@@ -148,5 +160,5 @@ class PersonalityAgent:
             system_prompt=final_system_prompt
         )
 
-        logger.debug(f"PersonalityAgent assembled system prompt with Anti-Refusal rules for {acc_name}")
+        logger.debug(f"PersonalityAgent assembled system prompt with TemplateManager for {acc_name}")
         return personality
