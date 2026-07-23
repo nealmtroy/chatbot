@@ -86,7 +86,8 @@ async def handle_message(account, event):
             return
 
         async with event.client.action(event.chat_id, "typing"):
-            ai_response = await clients.digital_twin_agent.generate_response_async(
+            ai_response = await asyncio.to_thread(
+                clients.digital_twin_agent.generate_response,
                 user_input=message_text,
                 conversation_history=conversation_history
             )
