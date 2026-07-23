@@ -8,15 +8,12 @@ from .env_loader import load_env
 # Load environment variables
 load_env()
 
-# Inisialisasi client AI terpusat (Groq / OpenRouter)
+# Inisialisasi client AI terpusat (Multi-Provider Fallback + ChromaDB RAG)
 from . import clients
 from . import db
 from . import user_tracker
 
 logger = logging.getLogger("AI-Engine")
-
-# Tidak lagi menyimpan snapshot — selalu pakai clients.client / clients.active_model
-# agar tidak stale kalau init() dipanggil ulang.
 
 # Directory paths
 PROMPTS_DIR = "prompts"
@@ -73,8 +70,7 @@ def save_correction(account_id_or_user, user_text=None, assistant_text=None):
 def retrieve_relevant_knowledge(message_text, knowledge_file=None, account_id=0):
     """
     Memindai kata kunci pada pesan masuk dan mengembalikan fakta relevan dari
-    knowledge.json (per-account) + tabel knowledge di DB.
-    Menggunakan _knowledge_cache berdasarkan getmtime file.
+    knowledge.json (per-account) + tabel knowledge di DB + ChromaDB Vector RAG dari ai-testing.
     """
     if knowledge_file is None:
         knowledge_file = KNOWLEDGE_FILE
@@ -100,9 +96,6 @@ def retrieve_relevant_knowledge(message_text, knowledge_file=None, account_id=0)
     except Exception:
         pass
 
-    if not all_entries:
-        return ""
-
     matched_facts = []
     message_lower = message_text.lower()
     for item in all_entries:
@@ -112,17 +105,28 @@ def retrieve_relevant_knowledge(message_text, knowledge_file=None, account_id=0)
                 matched_facts.append(item.get("fact"))
                 break
 
+    rag_text = ""
+    # ChromaDB Vector Search RAG dari DigitalTwinAgent
+    if clients.digital_twin_agent and hasattr(clients.digital_twin_agent, "rag"):
+        try:
+            rag_context = clients.digital_twin_agent.rag.get_context_for_prompt(message_text, top_k=2)
+            if "Belum ada riwayat chat export" not in rag_context:
+                rag_text = f"\n[CHROMADB_VECTOR_RAG_CONTEXT]\n{rag_context}\n"
+        except Exception as e:
+            logger.debug(f"ChromaDB RAG search notice: {e}")
+
+    retrieved_parts = []
     if matched_facts:
         logger.info("retrieve %d fakta relevan", len(matched_facts))
-        retrieved_text = "\n".join([f"- {fact}" for fact in matched_facts])
-        return f"\n[RELEVANT_KNOWLEDGE_FACTS]\nGunakan informasi fakta berikut sebagai referensi pengetahuan kamu (tetap jawab secara alami, ringkas, santai, dan tidak kaku/oversharing):\n{retrieved_text}\n"
+        fact_text = "\n".join([f"- {fact}" for fact in matched_facts])
+        retrieved_parts.append(f"\n[RELEVANT_KNOWLEDGE_FACTS]\nGunakan informasi fakta berikut sebagai referensi pengetahuan kamu:\n{fact_text}\n")
+    
+    if rag_text:
+        retrieved_parts.append(rag_text)
 
-    return ""
+    return "".join(retrieved_parts)
 
 
-# --- Import helper functions dari agents.critic_agent (canonical source) ---
-# Menghindari duplikasi kode: force_lowercase_except_laughter, _strip_think,
-# strip_formatting_and_limit_emojis, EMOJI_PATTERN
 from agents.critic_agent import (
     force_lowercase_except_laughter,
     _strip_think,
@@ -132,7 +136,30 @@ from agents.critic_agent import (
 
 
 async def _call_api_with_retry(messages, max_retries=3):
-    """Panggil API dengan exponential backoff sederhana."""
+    """Panggil API dengan Multi-Provider Fallback (OpenRouter, Groq, SambaNova, DeepSeek, OpenAI, Ollama)."""
+    # 1. Coba multi-provider fallback engine terlebih dahulu
+    try:
+        clean_ans = await clients.call_llm_multi_provider(messages, temperature=0.7, max_tokens=500)
+        if clean_ans and clean_ans.strip():
+            # mock OpenAI response format agar kompatibel
+            class MockMessage:
+                def __init__(self, content):
+                    self.content = content
+            class MockChoice:
+                def __init__(self, content):
+                    self.message = MockMessage(content)
+            class MockResponse:
+                def __init__(self, content):
+                    self.choices = [MockChoice(content)]
+            return MockResponse(clean_ans)
+    except Exception as e:
+        logger.warning(f"Multi-provider LLM call error, mencoba fallback direct client: {e}")
+
+    # 2. Fallback direct client
+    if clients.client is None:
+        logger.error("Clients client is None")
+        return None
+
     last_err = None
     for attempt in range(1, max_retries + 1):
         try:
@@ -140,8 +167,8 @@ async def _call_api_with_retry(messages, max_retries=3):
                 model=clients.active_model,
                 messages=messages,
                 temperature=0.7,
-                presence_penalty=0.6,    # Penalti agar AI selalu membahas hal baru
-                frequency_penalty=0.5,   # Penalti agar AI tidak mengulang emoji/kata yang sama
+                presence_penalty=0.6,
+                frequency_penalty=0.5,
                 max_tokens=500
             )
             return response
@@ -149,7 +176,7 @@ async def _call_api_with_retry(messages, max_retries=3):
             last_err = e
             logger.warning(f"Percobaan API #{attempt} gagal: {e}")
             if attempt < max_retries:
-                await asyncio.sleep(2 ** attempt)  # 2s, 4s, 8s
+                await asyncio.sleep(2 ** attempt)
     logger.error(f"Gagal memanggil API setelah {max_retries} percobaan: {last_err}")
     return None
 
@@ -163,13 +190,10 @@ _digital_clone_pipeline = DigitalClonePipeline(prompts_dir=PROMPTS_DIR)
 async def generate_ai_reply(account, user_db_id, user_name, message_text, max_history=20, return_full_output=False):
     """
     Menghasilkan balasan dari AI untuk 1 user di 1 account tertentu menggunakan
-    DigitalClonePipeline (6 Specialized Agents: Context, Memory, Personality, Response, Critic, Confidence).
-
-    account      : dict dari db.get_account() (atau list_accounts)
-    user_db_id   : id baris user di tabel users (sudah per-account)
+    DigitalClonePipeline (6 Specialized Agents + Multi-Provider Fallback + RAG Vector DB).
     """
-    if not clients.client:
-        logger.error(f"Client untuk provider {clients.SELECTED_PROVIDER} tidak diinisialisasi.")
+    if not clients.client and (clients.digital_twin_agent is None or not clients.digital_twin_agent.provider_targets):
+        logger.error("Client AI tidak terinisialisasi di .env")
         return (None, []) if not return_full_output else None
 
     output = await _digital_clone_pipeline.execute(
@@ -181,11 +205,9 @@ async def generate_ai_reply(account, user_db_id, user_name, message_text, max_hi
         max_history=max_history
     )
 
-    # Log confidence result
     conf = output.confidence
     logger.info(f"AI reply generated via DigitalClonePipeline (Score: {conf.score:.1f}%, Status: {conf.status})")
 
-    # If confidence status is hold (confidence too low), log warning
     if conf.status == "hold":
         logger.warning(f"Confidence score low ({conf.score:.1f}%): {conf.reason}")
 
@@ -195,13 +217,12 @@ async def generate_ai_reply(account, user_db_id, user_name, message_text, max_hi
     return output.final_text, output.bubbles
 
 
-
 async def generate_media_followup(account, user_db_id, user_name, message_text, max_history, intent):
     """
     Generate 1 bubble follow-up persuasif via AI setelah kirim media.
     Per-account: baca persona dari DB, history dari DB.
     """
-    if not clients.client:
+    if not clients.client and (clients.digital_twin_agent is None or not clients.digital_twin_agent.provider_targets):
         return ""
 
     account_id = account["id"]

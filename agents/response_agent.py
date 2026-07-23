@@ -7,6 +7,26 @@ from .base import ContextData, MemoryData, PersonalityData, ResponseDraft
 logger = logging.getLogger("ResponseAgent")
 
 async def _call_api_with_retry(messages, max_retries=3):
+    """Panggil API dengan Multi-Provider Fallback (OpenRouter, Groq, SambaNova, DeepSeek, OpenAI, Ollama)."""
+    try:
+        clean_text = await clients.call_llm_multi_provider(messages, temperature=0.85, max_tokens=300)
+        if clean_text and clean_text.strip():
+            class MockMessage:
+                def __init__(self, content):
+                    self.content = content
+            class MockChoice:
+                def __init__(self, content):
+                    self.message = MockMessage(content)
+            class MockResponse:
+                def __init__(self, content):
+                    self.choices = [MockChoice(content)]
+            return MockResponse(clean_text)
+    except Exception as e:
+        logger.warning(f"Multi-provider LLM call error di ResponseAgent: {e}")
+
+    if not clients.client:
+        return None
+
     last_err = None
     for attempt in range(1, max_retries + 1):
         try:
@@ -31,7 +51,7 @@ class ResponseAgent:
     """
     4. Response Agent
     Tujuan: Menyusun jawaban berdasarkan seluruh context, memory, dan personality rules.
-    Satu-satunya agent yang benar-benar menghasilkan isi balasan melalui LLM API.
+    Satu-satunya agent yang benar-benar menghasilkan isi balasan melalui LLM API (Multi-Provider Fallback).
     """
 
     async def process(
@@ -41,7 +61,7 @@ class ResponseAgent:
         personality: PersonalityData,
         max_history: int = 20
     ) -> ResponseDraft:
-        if not clients.client:
+        if not clients.client and (clients.digital_twin_agent is None or not clients.digital_twin_agent.provider_targets):
             logger.error("Client AI tidak terinisialisasi.")
             return ResponseDraft(raw_text="")
 
@@ -49,7 +69,6 @@ class ResponseAgent:
         for msg in context.last_messages[-max_history:]:
             messages.append({"role": msg["role"], "content": msg["content"]})
 
-        # Check if the last message in history is the current message.
         has_current = False
         if messages:
             last_msg = messages[-1]
@@ -70,6 +89,10 @@ class ResponseAgent:
         except (AttributeError, IndexError, KeyError) as e:
             logger.error(f"Format respons API tidak terduga: {e}")
             raw_text = ""
+
+        # Remove thinking/reasoning tags if present
+        if clients.digital_twin_agent:
+            _, raw_text = clients.digital_twin_agent._extract_thinking_and_clean_answer(raw_text)
 
         draft = ResponseDraft(raw_text=raw_text, messages_payload=messages)
         logger.debug(f"ResponseAgent generated raw draft length: {len(raw_text)}")
