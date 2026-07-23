@@ -1,9 +1,8 @@
 import os
 import re
-import asyncio
 from typing import List, Dict, Union, Tuple
 from dotenv import load_dotenv
-from openai import OpenAI, AsyncOpenAI
+from openai import OpenAI
 from src.rag_engine import ChromaRAGEngine
 from src.templates import TemplateManager
 
@@ -55,10 +54,12 @@ def _get_api_keys_for_provider(base_env_name: str) -> List[Tuple[str, str]]:
     Returns list of (key_name, key_value).
     """
     keys = []
+    # 1. Base key first
     base_val = os.getenv(base_env_name, "").strip()
     if base_val:
         keys.append((base_env_name, base_val))
     
+    # 2. Look for indexed or named variants (e.g. OPENROUTER_API_KEY_1, OPENROUTER_API_KEY_2)
     suffix_candidates = []
     prefix = base_env_name + "_"
     for env_k, env_v in os.environ.items():
@@ -84,10 +85,12 @@ class DigitalTwinAgent:
         self.data_dir = data_dir
         self.provider_targets = []
 
+        # Load active providers and multiple keys from .env
         for p_name, cfg in PROVIDERS_CONFIG.items():
             base_env = cfg["api_key_env"]
             api_keys = _get_api_keys_for_provider(base_env)
             
+            # Special handling for local Ollama
             if not api_keys and p_name == "ollama" and os.getenv(cfg["model_env"]):
                 api_keys = [("OLLAMA_LOCAL", "ollama")]
 
@@ -98,11 +101,7 @@ class DigitalTwinAgent:
                     models = cfg["default_models"]
 
                 for key_name, api_key in api_keys:
-                    sync_client = OpenAI(
-                        base_url=cfg["base_url"],
-                        api_key=api_key
-                    )
-                    async_client = AsyncOpenAI(
+                    client = OpenAI(
                         base_url=cfg["base_url"],
                         api_key=api_key
                     )
@@ -110,13 +109,15 @@ class DigitalTwinAgent:
                         self.provider_targets.append({
                             "provider": p_name,
                             "key_name": key_name,
-                            "client": sync_client,
-                            "async_client": async_client,
+                            "client": client,
                             "model": model
                         })
 
         if not self.provider_targets:
-            print("⚠️ Warning: Tidak ada API Key LLM Provider yang aktif di .env!")
+            raise ValueError(
+                "Tidak ada API Key LLM Provider yang aktif di .env!\n"
+                "Harap isi minimal salah satu API Key di file .env (misal: OPENROUTER_API_KEY, OPENROUTER_API_KEY_1, GROQ_API_KEY, dll)."
+            )
 
         self.rag = ChromaRAGEngine(data_dir)
         self.template_mgr = TemplateManager(data_dir)
@@ -180,7 +181,7 @@ class DigitalTwinAgent:
         return debug_thinking, (final_answer if final_answer else clean_text)
 
     def generate_response(self, user_input: str, conversation_history: list = None) -> str:
-        """Generate response matching exact WhatsApp export conversation flow and typing style (Sync)."""
+        """Generate response matching exact WhatsApp export conversation flow and typing style."""
         rag_context = self.rag.get_context_for_prompt(user_input, top_k=3)
         formatted_rag_context = self.template_mgr.replace_placeholders(rag_context)
         
@@ -211,9 +212,6 @@ class DigitalTwinAgent:
         messages.append({"role": "user", "content": user_input})
 
         total_targets = len(self.provider_targets)
-        if total_targets == 0:
-            return "Error: Tidak ada provider LLM aktif di .env."
-
         print(f"🤖 [DEBUG MULTI-PROVIDER LLM] Menyiapkan pemanggilan ({total_targets} target provider/key/model aktif)...")
 
         last_exception = None
@@ -254,67 +252,3 @@ class DigitalTwinAgent:
         if last_exception:
             raise last_exception
         return "Gagal mendapatkan respon dari AI."
-
-    async def generate_response_async(self, user_input: str, conversation_history: list = None) -> str:
-        """Generate response matching exact WhatsApp export conversation flow asynchronously."""
-        rag_context = self.rag.get_context_for_prompt(user_input, top_k=3)
-        formatted_rag_context = self.template_mgr.replace_placeholders(rag_context)
-        
-        bot_name = self.template_mgr.config.get("bot_name", "Intan")
-        pricelist_template = self.template_mgr.get_pricelist_template()
-
-        system_prompt = (
-            f"Kamu adalah AI Persona / Digital Twin dengan nama '{bot_name}'.\n"
-            "TUGAS UTAMA: Jawab pertanyaan atau ajakan obrolan dengan MENIRU 100% GAYA BAHASA, "
-            "KOSA KATA, DAN RITME NGETIK (Reply) berdasarkan referensi riwayat chat export WhatsApp berikut.\n\n"
-            f"{formatted_rag_context}\n\n"
-            f"TEMPLATE PRICELIST RESMI KAMU:\n{pricelist_template}\n\n"
-            "ATURAN KETAT:\n"
-            "1. JANGAN PERNAH terdengar seperti AI formal, bot, atau customer service.\n"
-            "2. JANGAN PERNAH MENULISKAN PROSES BERPIKIR / ANALISIS / CHAIN-OF-THOUGHT DI HASIL AKHIR BALASAN.\n"
-            "3. Tirulah alur respon 'reply' sesuai contoh riwayat obrolan di atas.\n"
-            "4. Jika pada contoh riwayat obrolan user menggunakan 2 balasan, "
-            "kamu JUGA harus memisahkan balasanmu menjadi 2 baris (enter) sesuai ritme khas user mebutuhkannya.\n"
-            "5. Jawaban harus santai, natural, dan sesuai gaya penulisan asli user.\n"
-            "6. Jika user menanyakan daftar harga / pricelist / list harga, KIRIMKAN TEMPLATE PRICELIST RESMI di atas secara persis."
-        )
-
-        messages = [{"role": "system", "content": system_prompt}]
-        
-        if conversation_history:
-            messages.extend(conversation_history)
-
-        messages.append({"role": "user", "content": user_input})
-
-        return await self.call_llm_messages_async(messages)
-
-    async def call_llm_messages_async(self, messages: list, temperature: float = 0.7, max_tokens: int = 500) -> str:
-        """Call LLM with payload messages using multi-provider fallback asynchronously."""
-        total_targets = len(self.provider_targets)
-        if total_targets == 0:
-            return ""
-
-        last_exception = None
-        for idx, target in enumerate(self.provider_targets, 1):
-            provider_name = target["provider"].upper()
-            key_name = target["key_name"]
-            model_name = target["model"]
-            async_client = target["async_client"]
-
-            try:
-                response = await async_client.chat.completions.create(
-                    model=model_name,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-                raw_answer = response.choices[0].message.content.strip()
-                _, clean_answer = self._extract_thinking_and_clean_answer(raw_answer)
-                return clean_answer
-            except Exception as e:
-                last_exception = e
-                print(f"   ❌ [FALLBACK ASYNC] Provider [{provider_name}] ({key_name}) Model '{model_name}' error: {e}")
-
-        if last_exception:
-            print(f"   ❌ Semua provider fallback gagal dipanggil: {last_exception}")
-        return ""

@@ -1,13 +1,7 @@
 import json
 import os
+import chromadb
 from typing import List, Dict, Any, Union
-
-try:
-    import chromadb
-    CHROMADB_AVAILABLE = True
-except ImportError:
-    CHROMADB_AVAILABLE = False
-    print("[WARNING] Module 'chromadb' tidak ditemukan. Fitur Vector DB RAG berjalan dalam fallback mode.")
 
 class ChromaRAGEngine:
     def __init__(self, data_dir: str):
@@ -16,20 +10,14 @@ class ChromaRAGEngine:
         self.db_path = os.path.join(data_dir, "chroma_db")
         self.history_file = os.path.join(data_dir, "my_chat_history.json")
         
-        self.sessions = []
-        self.chroma_client = None
-        self.collection = None
-
-        if CHROMADB_AVAILABLE:
-            try:
-                self.chroma_client = chromadb.PersistentClient(path=self.db_path)
-                self.collection = self.chroma_client.get_or_create_collection(
-                    name="digital_twin_kb",
-                    metadata={"hnsw:space": "cosine"}
-                )
-            except Exception as e:
-                print(f"[!] Error inisialisasi ChromaDB: {e}")
+        # Initialize ChromaDB persistent vector database
+        self.chroma_client = chromadb.PersistentClient(path=self.db_path)
+        self.collection = self.chroma_client.get_or_create_collection(
+            name="digital_twin_kb",
+            metadata={"hnsw:space": "cosine"}
+        )
         
+        self.sessions = []
         self._load_and_index_sessions()
 
     def _load_and_index_sessions(self):
@@ -47,9 +35,17 @@ class ChromaRAGEngine:
         self.reindex_all()
 
     def parse_raw_chat_block(self, partner_name: str, raw_text: str) -> List[Dict[str, str]]:
-        """Parse raw WhatsApp style text block."""
+        """
+        Parse raw WhatsApp style text block like:
+        dika: hi
+        reply: kenapa bro
+        dika: lagi dimana?
+        reply: lagi dirumah bro
+        reply: kenapa emg bro?
+        """
         lines = [line.strip() for line in raw_text.strip().split("\n") if line.strip()]
         parsed_messages = []
+        
         partner_name_lower = partner_name.lower()
 
         for line in lines:
@@ -57,22 +53,25 @@ class ChromaRAGEngine:
                 sender_part, text_part = line.split(":", 1)
                 sender = sender_part.strip()
                 text = text_part.strip()
+                
                 if sender.lower() == partner_name_lower or sender.lower() != "reply":
                     parsed_messages.append({"sender": partner_name, "text": text})
                 else:
                     parsed_messages.append({"sender": "reply", "text": text})
             else:
+                # Default to reply if no prefix specified
                 parsed_messages.append({"sender": "reply", "text": line})
 
         return parsed_messages
 
     def add_session(self, partner_name: str, messages: List[Dict[str, str]], summary: str = ""):
         """Add a complete continuous chat session and index to ChromaDB."""
+        # Synchronize memory with disk file if modified externally
         if os.path.exists(self.history_file):
             try:
                 with open(self.history_file, "r", encoding="utf-8") as f:
                     self.sessions = json.load(f)
-            except Exception:
+            except Exception as e:
                 pass
 
         session_id = f"session_{len(self.sessions) + 1}"
@@ -84,37 +83,35 @@ class ChromaRAGEngine:
         }
         self.sessions.append(session_data)
 
+        # Save to JSON file
         with open(self.history_file, "w", encoding="utf-8") as f:
             json.dump(self.sessions, f, indent=2, ensure_ascii=False)
 
-        if self.collection:
-            transcript_lines = [f"Contact: {partner_name}"]
-            if summary:
-                transcript_lines.append(f"Summary/Context: {summary}")
-            for msg in messages:
-                sender = msg.get("sender", "reply")
-                text = msg.get("text", "")
-                transcript_lines.append(f"{sender}: {text}")
+        # Build transcript text for ChromaDB vector search
+        transcript_lines = [f"Contact: {partner_name}"]
+        if summary:
+            transcript_lines.append(f"Summary/Context: {summary}")
+        
+        for msg in messages:
+            sender = msg.get("sender", "reply")
+            text = msg.get("text", "")
+            transcript_lines.append(f"{sender}: {text}")
 
-            full_transcript = "\n".join(transcript_lines)
-            try:
-                self.collection.upsert(
-                    documents=[full_transcript],
-                    metadatas=[{
-                        "partner_name": partner_name,
-                        "summary": summary,
-                        "json_data": json.dumps(session_data, ensure_ascii=False)
-                    }],
-                    ids=[session_id]
-                )
-            except Exception as e:
-                print(f"[!] Error upsert ChromaDB: {e}")
+        full_transcript = "\n".join(transcript_lines)
+
+        # Upsert to ChromaDB
+        self.collection.upsert(
+            documents=[full_transcript],
+            metadatas=[{
+                "partner_name": partner_name,
+                "summary": summary,
+                "json_data": json.dumps(session_data, ensure_ascii=False)
+            }],
+            ids=[session_id]
+        )
 
     def reindex_all(self):
         """Re-index all sessions into ChromaDB."""
-        if not self.collection:
-            return
-
         documents = []
         metadatas = []
         ids = []
@@ -125,6 +122,7 @@ class ChromaRAGEngine:
             summary = session.get("summary", "")
             messages = session.get("messages", [])
 
+            # Handle backward compatibility if single items existed
             if not messages and ("partner_msgs" in session or "partner_msg" in session):
                 partner_msgs = session.get("partner_msgs", session.get("partner_msg", []))
                 if isinstance(partner_msgs, str): partner_msgs = [partner_msgs]
@@ -147,6 +145,7 @@ class ChromaRAGEngine:
                 transcript_lines.append(f"{sender}: {text}")
 
             full_transcript = "\n".join(transcript_lines)
+
             documents.append(full_transcript)
             metadatas.append({
                 "partner_name": partner_name,
@@ -155,52 +154,38 @@ class ChromaRAGEngine:
             })
             ids.append(session_id)
 
-        if documents and self.collection:
-            try:
-                self.collection.upsert(
-                    documents=documents,
-                    metadatas=metadatas,
-                    ids=ids
-                )
-            except Exception as e:
-                print(f"[!] Error reindex ChromaDB: {e}")
+        if documents:
+            self.collection.upsert(
+                documents=documents,
+                metadatas=metadatas,
+                ids=ids
+            )
 
     def clear_all(self):
         """Clear all stored sessions and reset ChromaDB index."""
         self.sessions = []
         if os.path.exists(self.history_file):
-            try:
-                os.remove(self.history_file)
-            except Exception:
-                pass
+            os.remove(self.history_file)
         
-        if self.chroma_client:
-            try:
-                self.chroma_client.delete_collection("digital_twin_kb")
-            except Exception:
-                pass
-            try:
-                self.collection = self.chroma_client.get_or_create_collection(
-                    name="digital_twin_kb",
-                    metadata={"hnsw:space": "cosine"}
-                )
-            except Exception:
-                pass
+        try:
+            self.chroma_client.delete_collection("digital_twin_kb")
+        except Exception:
+            pass
+        self.collection = self.chroma_client.get_or_create_collection(
+            name="digital_twin_kb",
+            metadata={"hnsw:space": "cosine"}
+        )
 
     def search_vector_db(self, query: str, top_k: int = 5, distance_threshold: float = 0.65) -> List[Dict[str, Any]]:
-        """Perform semantic vector search using ChromaDB embeddings."""
-        if not self.collection or self.collection.count() == 0:
+        """Perform semantic vector search using ChromaDB embeddings with distance thresholding."""
+        if self.collection.count() == 0:
             return []
 
-        try:
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=min(top_k, self.collection.count()),
-                include=["documents", "metadatas", "distances"]
-            )
-        except Exception as e:
-            print(f"[!] Query ChromaDB error: {e}")
-            return []
+        results = self.collection.query(
+            query_texts=[query],
+            n_results=min(top_k, self.collection.count()),
+            include=["documents", "metadatas", "distances"]
+        )
 
         matched_results = []
         if results and "metadatas" in results and results["metadatas"]:
@@ -218,7 +203,8 @@ class ChromaRAGEngine:
         return matched_results
 
     def get_context_for_prompt(self, query: str, top_k: int = 3) -> str:
-        """Build structured context string for LLM system prompt."""
+        """Build structured context string to inject into LLM system prompt."""
+        # Auto-sync memory and ChromaDB index if my_chat_history.json was updated
         if os.path.exists(self.history_file):
             try:
                 with open(self.history_file, "r", encoding="utf-8") as f:
@@ -229,32 +215,25 @@ class ChromaRAGEngine:
             except Exception:
                 pass
 
+        print(f"\n🔍 [DEBUG RAG] Searching Vector DB for query: '{query}'")
         matches = self.search_vector_db(query, top_k=top_k, distance_threshold=0.65)
         
         if not matches:
-            simple_matches = []
-            q_lower = query.lower()
-            for s in self.sessions:
-                for msg in s.get("messages", []):
-                    if any(w in msg.get("text", "").lower() for w in q_lower.split() if len(w) > 3):
-                        simple_matches.append(s)
-                        break
-
-            if simple_matches:
-                context_parts = ["=== RIWAYAT CHAT EXPORT (SIMPLE MATCH) ==="]
-                for idx, s in enumerate(simple_matches[:top_k], 1):
-                    partner = s.get("partner_name", "Teman")
-                    context_parts.append(f"--- Session #{idx} ({partner}) ---")
-                    for msg in s.get("messages", []):
-                        context_parts.append(f"{msg.get('sender', 'reply')}: {msg.get('text', '')}")
-                    context_parts.append("")
-                return "\n".join(context_parts)
-
+            print("   ↳ ⚠️ Tidak ditemukan riwayat chat yang cocok / relevan di Vector DB.")
             return "Belum ada riwayat chat export yang relevan. Jawablah sesuai gaya penulisan santai dan logis."
 
+        print(f"   ↳ ✅ Ditemukan {len(matches)} session riwayat chat paling relevan:")
         context_parts = ["=== RIWAYAT CHAT EXPORT (WHATSAPP STYLE CONVERSATION FLOW) ==="]
         for idx, item in enumerate(matches, 1):
             doc = item["document"]
+            meta = item.get("metadata", {})
+            dist = item.get("distance", 0.0)
+            partner = meta.get("partner_name", "Teman")
+            first_line = doc.strip().split("\n")[0] if doc else ""
+            second_line = doc.strip().split("\n")[1] if len(doc.strip().split("\n")) > 1 else ""
+            snippet = f"{first_line} | {second_line}".replace("\n", " ")
+            print(f"      [{idx}] Session '{partner}' (Dist: {dist:.3f}) -> Snippet: {snippet[:60]}...")
+            
             context_parts.append(f"--- Session #{idx} ---")
             context_parts.append(doc.strip())
             context_parts.append("")
