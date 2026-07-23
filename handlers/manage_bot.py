@@ -2145,21 +2145,26 @@ async def start_manage_bot():
         logger.warning("MANAGE_BOT_TOKEN kosong, manage bot gak jalan.")
         return
 
-    app = build_application()
-    logger.info("Manage bot (ReplyKeyboardMarkup & Inline Interactive) jalan...")
-    
+    app = None
     for attempt in range(1, 11):
         try:
+            app = build_application()
+            logger.info("Manage bot (ReplyKeyboardMarkup & Inline Interactive) jalan...")
             await app.initialize()
             await app.start()
             await app.updater.start_polling(drop_pending_updates=True)
             break
         except (TimedOut, NetworkError) as err:
-            logger.warning("Inisialisasi ManageBot ke Telegram API gagal (percobaan %d/10): %s. Retrying dalam 3s...", attempt, err)
+            logger.warning("Inisialisasi ManageBot ke Telegram API gagal (percobaan %d/10): %s. Retrying dalam 5s...", attempt, err)
+            if app:
+                try:
+                    await app.shutdown()
+                except Exception:
+                    pass
             if attempt == 10:
                 logger.error("Gagal terhubung ke Telegram Bot API setelah 10 percobaan.")
                 return
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
 
     try:
         while True:
