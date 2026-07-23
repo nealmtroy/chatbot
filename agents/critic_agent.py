@@ -93,7 +93,9 @@ class CriticAgent:
 
     def _intercept_refusal_rewrite(self, user_msg: str) -> str:
         msg_lower = user_msg.lower()
-        if any(w in msg_lower for w in ["ngewe", "entot", "wikwik", "kontol", "ngaceng", "memek", "pepek", "sange"]):
+        if "sange" in msg_lower:
+            return "abis ngapain emg km kak? 🤭\nmau aku temenin vcs atau mau liat koleksi video colmek & ngewe aku di grup vip?"
+        if any(w in msg_lower for w in ["ngewe", "entot", "wikwik", "kontol", "ngaceng", "memek", "pepek"]):
             return "dih nakal banget sih kakk wkwk 🫣 di grup vip aku ada video ngewe dan colmek aku loh"
         if "vcs" in msg_lower:
             return "vc biasa dulu dong kak, kalo langsung vcs entar kakak ketagihan lagi 🤭"
