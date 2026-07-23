@@ -17,6 +17,7 @@ from vip_bot.helpers import (
     send_broadcast_to_user,
     user_link,
     plain_user_link,
+    telegram_user_link,
     format_rupiah,
     referral_commission,
     internal_telegram_chat_url,
@@ -186,9 +187,15 @@ async def process_paid_payment(client, config, store, payment):
             f"<b>Invoice</b>: <code>{html.escape(payment.get('public_invoice_id') or payment['inv_id'])}</code>\n"
             f"<b>Internal Invoice</b>: {html.escape(payment['inv_id'])}\n"
             f"<b>Invite Link</b>: {html.escape(invite_link)}\n"
+            f"<b>Invite Link Expires</b>: {format_log_datetime_wrapper(invite_expires_at)}"
             "</blockquote>"
         ),
     )
+
+
+def format_log_datetime_wrapper(raw):
+    from vip_bot.helpers import format_log_datetime
+    return format_log_datetime(raw)
 
 
 async def poll_once(client, config, store, payment):
@@ -249,8 +256,39 @@ async def poll_once(client, config, store, payment):
                     next_poll_at(created_at, expires_at, attempts=attempts, error=marker) or utc_now_iso(),
                     error=marker,
                 )
+            if marker not in previous_error:
+                await send_log(
+                    client,
+                    config,
+                    store,
+                    (
+                        "<b>Polling gateway blocked</b>\n"
+                        f"Invoice: <code>{html.escape(payment.get('public_invoice_id') or payment['inv_id'])}</code>\n"
+                        f"Internal invoice: <code>{html.escape(payment['inv_id'])}</code>\n"
+                        "Reason: <code>SociaBuzz Cloudflare HTTP 403</code>"
+                    ),
+                )
             return
         LOGGER.exception("Polling failed for %s", payment["inv_id"])
+        if payment["status"] == "pending":
+            created_at = parse_iso_datetime(payment.get("created_at")) or dt.datetime.now(dt.timezone.utc)
+            expires_at = parse_iso_datetime(payment.get("qris_expires"))
+            attempts = int(payment.get("poll_attempts") or 0) + 1
+            store.record_poll_result(
+                payment,
+                next_poll_at(created_at, expires_at, attempts=attempts, error=str(exc)) or utc_now_iso(),
+                error=str(exc),
+            )
+        await send_log(
+            client,
+            config,
+            store,
+            (
+                "<b>Polling error</b>\n"
+                f"Invoice: <code>{html.escape(payment['inv_id'])}</code>\n"
+                f"Error: <code>{html.escape(str(exc))}</code>"
+            ),
+        )
 
 
 async def expire_pending_payment(client, config, store, payment, title="Payment expired"):
@@ -267,18 +305,28 @@ async def expire_pending_payment(client, config, store, payment, title="Payment 
         parse_mode="html",
         buttons=package_buttons(config, store),
     )
-    await send_log(
-        client,
-        config,
-        store,
-        (
-            f"<b>{html.escape(title)}</b>\n"
-            f"User: {user_link(payment)} (<code>{payment['user_id']}</code>)\n"
-            f"Invoice: <code>{html.escape(payment.get('public_invoice_id') or payment['inv_id'])}</code>\n"
-            f"Internal invoice: <code>{html.escape(payment['inv_id'])}</code>\n"
-            f"Package: <code>{html.escape(payment.get('package_code') or '')}</code> {html.escape(payment.get('package_name') or '')}"
-        ),
-    )
+    is_custom = not (payment.get("package_code") or payment.get("package_name"))
+    if is_custom:
+        log_text = (
+            "<b>Custom QRIS Expired</b>\n\n"
+            "<blockquote>"
+            f"<b>User</b>: {user_link(payment)} (<code>{payment['user_id']}</code>)\n"
+            f"<b>Custom QRIS Amount</b>: {format_rupiah(int(payment.get('amount') or 0))}\n"
+            f"<b>Invoice</b>: <code>{html.escape(payment.get('public_invoice_id') or payment['inv_id'])}</code>\n"
+            f"<b>Internal Invoice</b>: <code>{html.escape(payment['inv_id'])}</code>"
+            "</blockquote>"
+        )
+    else:
+        log_text = (
+            "<b>PAYMENT EXPIRED</b>\n\n"
+            "<blockquote>"
+            f"<b>User</b>: {user_link(payment)} (<code>{payment['user_id']}</code>)\n"
+            f"<b>Package</b>: {html.escape(payment.get('package_code') or '')} {html.escape(payment.get('package_name') or '')}\n"
+            f"<b>Invoice</b>: <code>{html.escape(payment.get('public_invoice_id') or payment['inv_id'])}</code>\n"
+            f"<b>Internal Invoice</b>: <code>{html.escape(payment['inv_id'])}</code>"
+            "</blockquote>"
+        )
+    await send_log(client, config, store, log_text)
 
 
 async def polling_loop(client, config, store):
@@ -299,6 +347,12 @@ async def polling_loop(client, config, store):
                 await poll_once(client, config, store, payment)
         except Exception as exc:
             LOGGER.exception("Polling loop error")
+            await send_log(
+                client,
+                config,
+                store,
+                f"<b>Polling loop error</b>\n<code>{html.escape(str(exc))}</code>",
+            )
         await asyncio.sleep(config.poll_interval_seconds)
 
 
@@ -376,4 +430,5 @@ async def broadcast_loop(client, config, store):
             )
         except Exception as exc:
             LOGGER.exception("Broadcast loop error")
+            await send_log(client, config, store, f"<b>Broadcast loop error</b>\n<code>{html.escape(str(exc))}</code>")
         await asyncio.sleep(60)
