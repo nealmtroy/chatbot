@@ -267,6 +267,18 @@ async def expire_pending_payment(client, config, store, payment, title="Payment 
         parse_mode="html",
         buttons=package_buttons(config, store),
     )
+    await send_log(
+        client,
+        config,
+        store,
+        (
+            f"<b>{html.escape(title)}</b>\n"
+            f"User: {user_link(payment)} (<code>{payment['user_id']}</code>)\n"
+            f"Invoice: <code>{html.escape(payment.get('public_invoice_id') or payment['inv_id'])}</code>\n"
+            f"Internal invoice: <code>{html.escape(payment['inv_id'])}</code>\n"
+            f"Package: <code>{html.escape(payment.get('package_code') or '')}</code> {html.escape(payment.get('package_name') or '')}"
+        ),
+    )
 
 
 async def polling_loop(client, config, store):
