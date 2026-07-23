@@ -280,6 +280,29 @@ async def handle_message(account, event):
                     package=package
                 )
                 
+                # Send log to logging channel
+                try:
+                    from vip_bot.helpers import send_log, telegram_user_link, format_custom_qris_expiry, format_rupiah
+                    expires_countdown = qris.get("data", {}).get("countdown") or ""
+                    await send_log(
+                        event.client,
+                        vip_config,
+                        payment_store,
+                        (
+                            "<b>AI CREATED QRIS</b>\n\n"
+                            "<blockquote>"
+                            f"<b>Userbot Account</b>: {account['name']}\n"
+                            f"<b>User</b>: {telegram_user_link(sender)} (<code>{user_id_tg}</code>)\n"
+                            f"<b>Invoice</b>: <code>{buyer_invoice_id}</code>\n"
+                            f"<b>Package</b>: {note_prefix}\n"
+                            f"<b>Amount</b>: {format_rupiah(checkout_amount)}\n"
+                            f"<b>Expires</b>: {format_custom_qris_expiry(expires_countdown)}"
+                            "</blockquote>"
+                        )
+                    )
+                except Exception as log_exc:
+                    logger.warning("Gagal mengirim log QRIS ke channel: %s", log_exc)
+                
                 # Send bubbles after QRIS
                 if qris_index >= 0 and qris_index < len(cleaned_lines):
                     for i in range(qris_index, len(cleaned_lines)):
