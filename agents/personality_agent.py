@@ -120,12 +120,21 @@ class PersonalityAgent:
                 examples_text += f'- User: "{user_q}" -> Reply Asli: "{replies}"\n'
             system_prompt_parts.append(examples_text.strip())
 
-        # Koreksi DB (.revisi)
-        if corrections:
-            corr_text = "\nAturan Tambahan & Koreksi Penting dari Pemilik Akun (Kamu wajib mengikuti contoh ini jika menerima pesan sejenis):\n"
-            for corr in corrections[-15:]:
-                corr_text += f'- Jika ada yang mengirim pesan/tanya: "{corr.get("user", "")}" -> Kamu wajib membalas seperti ini: "{corr.get("assistant", "")}"\n'
-            system_prompt_parts.append(corr_text.strip())
+        # Check if assistant's last message in history already contains VIP sales pitch
+        last_assistant_msg = ""
+        for m in reversed(context.last_messages):
+            if m.get("role") == "assistant":
+                last_assistant_msg = str(m.get("content") or "").lower()
+                break
+
+        if any(w in last_assistant_msg for w in ["vip", "qris", "bayar", "50k", "100k", "gabung"]):
+            anti_repetition_prompt = """
+[ATURAN UTAMA DILARANG SPAM SALES PITCH REPETITIF]
+- Di pesan sebelumnya kamu SUDAH menawarkan grup VIP / harga.
+- DILARANG PERNAH mengulang penawaran grup VIP, menyebutkan harga, atau bertanya "mau gabung nggak?" lagi di pesan ini!
+- Cukup balas obrolan user saat ini secara santai, gaul, manis, dan ramah seperti cewek biasa ngobrol sama teman di Telegram tanpa jualan!
+"""
+            system_prompt_parts.append(anti_repetition_prompt.strip())
 
         final_system_prompt = "\n\n".join(system_prompt_parts)
 

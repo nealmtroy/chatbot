@@ -38,6 +38,9 @@ AUTO_REPLY = {}  # account_id -> bool (toggle per account)
 MAX_HISTORY = 20
 
 
+USER_PROCESSING = set()  # set of (acc_id, user_db_id)
+
+
 async def handle_message(account, event):
     """Handler untuk 1 account. `account` = dict dari db.get_account()."""
     acc_id = account["id"]
@@ -80,89 +83,98 @@ async def handle_message(account, event):
 
     logger.info("[%s] pesan dari %s (tg=%s): %s", account["name"], user_name, user_id_tg, message_text)
 
-    # --- User tracking: get-or-create di DB ---
+    # --- User tracking: get-or-create di DB & simpan pesan segera ---
     u = db.get_or_create_user(acc_id, user_id_tg, user_name, getattr(sender, "username", ""))
     user_db_id = u["id"]
+    user_key = (acc_id, user_db_id)
 
-    # Jeda random biar natural (10 - 30 detik)
-    think = random.randint(10, 30)
-    await asyncio.sleep(think)
-    try:
-        await event.client.send_read_acknowledge(event.chat_id, event.message, clear_mentions=True)
-    except Exception as e:
-        logger.warning("mark-read gagal: %s", e)
-
-    # --- Media intent dulu ---
-    intent = media_handler.detect_intent(message_text)
-    if intent:
-        sent = await media_handler.send_media_by_intent(
-            event.client, event, message_text,
-            account_id=acc_id, user_db_id=user_db_id,
-            user_name=user_name, max_history=MAX_HISTORY,
-        )
-        if sent:
-            db.add_message(acc_id, user_db_id, "user", message_text)
-            db.evict_history(user_db_id, MAX_HISTORY)
-            # Media request = user jelas interested, advance langsung
-            db.advance_stage(user_db_id, "interested")
-            return
-
-    # --- Simpan user msg & enrich profil ---
     db.add_message(acc_id, user_db_id, "user", message_text)
     db.evict_history(user_db_id, MAX_HISTORY)
-    # Stage detection sekarang ditangani oleh StageAgent di dalam pipeline
     user_tracker.enrich_from_message(user_db_id, message_text)
 
-    # --- AI reply ---
-    async with event.client.action(event.chat_id, "typing"):
-        reply_text, bubbles = await ai_engine.generate_ai_reply(
-            account, user_db_id, user_name, message_text, max_history=MAX_HISTORY
-        )
-
-    if not reply_text:
+    # Debounce: Jika user ini sedang dalam proses pemrosesan AI, tidak perlu spawn task duplikat
+    if user_key in USER_PROCESSING:
+        logger.info("[%s] user %s (tg=%s) sedang diproses AI, skip task duplikat.", account["name"], user_name, user_id_tg)
         return
 
-    should_create_qris = "[ACTION:CREATE_QRIS]" in reply_text.upper()
+    USER_PROCESSING.add(user_key)
+    try:
+        # Jeda 3-5 detik biar natural & menampung jika user mengirim beberapa pesan cepat beruntun
+        think = random.randint(3, 5)
+        await asyncio.sleep(think)
+        try:
+            await event.client.send_read_acknowledge(event.chat_id, event.message, clear_mentions=True)
+        except Exception as e:
+            logger.warning("mark-read gagal: %s", e)
 
-    # Clean any action tags from reply_text & bubbles if present
-    if "[ACTION:" in reply_text.upper():
-        reply_text = re.sub(r'\[ACTION:\s*[A-Z0-9_]+\]', '', reply_text, flags=re.IGNORECASE).strip()
-        cleaned_bubbles = []
-        for b in bubbles:
-            clean_b_text = re.sub(r'\[ACTION:\s*[A-Z0-9_]+\]', '', b["text"], flags=re.IGNORECASE).strip()
-            if clean_b_text:
-                b["text"] = clean_b_text
-                cleaned_bubbles.append(b)
-        bubbles = cleaned_bubbles
+        # Ambil pesan user paling mutakhir dari history
+        latest_history = db.get_history(user_db_id, limit=1)
+        latest_user_text = latest_history[-1]["content"] if latest_history else message_text
 
-    if reply_text:
-        db.add_message(acc_id, user_db_id, "assistant", reply_text)
-        db.evict_history(user_db_id, MAX_HISTORY)
+        # --- Media intent dulu ---
+        intent = media_handler.detect_intent(latest_user_text)
+        if intent:
+            sent = await media_handler.send_media_by_intent(
+                event.client, event, latest_user_text,
+                account_id=acc_id, user_db_id=user_db_id,
+                user_name=user_name, max_history=MAX_HISTORY,
+            )
+            if sent:
+                db.advance_stage(user_db_id, "interested")
+                return
 
-        for bubble in bubbles:
-            async with event.client.action(event.chat_id, "typing"):
-                await asyncio.sleep(bubble["delay"])
-            try:
-                await event.respond(bubble["text"])
-                logger.info("[%s] reply ke %s: %s", account["name"], user_name, bubble["text"])
-            except FloodWaitError as e:
-                logger.warning("FloodWait %ss", e.seconds)
-                await asyncio.sleep(e.seconds)
+        # --- AI reply ---
+        async with event.client.action(event.chat_id, "typing"):
+            reply_text, bubbles = await ai_engine.generate_ai_reply(
+                account, user_db_id, user_name, latest_user_text, max_history=MAX_HISTORY
+            )
+
+        if not reply_text:
+            return
+
+        should_create_qris = "[ACTION:CREATE_QRIS]" in reply_text.upper()
+
+        # Clean any action tags from reply_text & bubbles if present
+        if "[ACTION:" in reply_text.upper():
+            reply_text = re.sub(r'\[ACTION:\s*[A-Z0-9_]+\]', '', reply_text, flags=re.IGNORECASE).strip()
+            cleaned_bubbles = []
+            for b in bubbles:
+                clean_b_text = re.sub(r'\[ACTION:\s*[A-Z0-9_]+\]', '', b["text"], flags=re.IGNORECASE).strip()
+                if clean_b_text:
+                    b["text"] = clean_b_text
+                    cleaned_bubbles.append(b)
+            bubbles = cleaned_bubbles
+
+        if reply_text:
+            db.add_message(acc_id, user_db_id, "assistant", reply_text)
+            db.evict_history(user_db_id, MAX_HISTORY)
+
+            for bubble in bubbles:
+                async with event.client.action(event.chat_id, "typing"):
+                    await asyncio.sleep(bubble["delay"])
                 try:
                     await event.respond(bubble["text"])
+                    logger.info("[%s] reply ke %s: %s", account["name"], user_name, bubble["text"])
+                except FloodWaitError as e:
+                    logger.warning("FloodWait %ss", e.seconds)
+                    await asyncio.sleep(e.seconds)
+                    try:
+                        await event.respond(bubble["text"])
+                    except Exception as ex:
+                        logger.error("gagal kirim bubble setelah floodwait: %s", ex)
                 except Exception as ex:
-                    logger.error("gagal kirim bubble setelah floodwait: %s", ex)
-            except Exception as ex:
-                logger.error("gagal kirim bubble: %s", ex)
+                    logger.error("gagal kirim bubble: %s", ex)
 
-    if should_create_qris:
-        await payment_handler.create_and_send_qris(
-            client=event.client,
-            event=event,
-            account=account,
-            user_db_id=user_db_id,
-            tg_user_id=user_id_tg,
-        )
+        if should_create_qris:
+            await payment_handler.create_and_send_qris(
+                client=event.client,
+                event=event,
+                account=account,
+                user_db_id=user_db_id,
+                tg_user_id=user_id_tg,
+            )
+    finally:
+        USER_PROCESSING.discard(user_key)
 
 
 async def _handle_revisi(account, event):
