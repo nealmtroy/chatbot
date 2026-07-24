@@ -87,6 +87,20 @@ def _get_api_keys_for_provider(base_env_name: str) -> List[Tuple[str, str]]:
 
     return keys
 
+
+def remove_emojis(text: str) -> str:
+    """Remove emojis and normalize spaces."""
+    # Match standard emojis, dingbats, variation selectors, and supplementary plane symbols
+    emoji_pattern = re.compile(
+        r'[\u2600-\u27bf]|[\U00010000-\U0010ffff]|\ufe0f',
+        flags=re.UNICODE
+    )
+    # Remove emojis and clean up multiple spaces left behind
+    cleaned = emoji_pattern.sub('', text)
+    cleaned = re.sub(r' +', ' ', cleaned).strip()
+    return cleaned
+
+
 class DigitalTwinAgent:
     def __init__(self, data_dir: str):
         self.data_dir = data_dir
@@ -283,7 +297,8 @@ class DigitalTwinAgent:
             "kamu JUGA harus memisahkan balasanmu menjadi 2 baris (enter) sesuai ritme khas user mebutuhkannya.\n"
             "5. Jawaban harus santai, natural, dan sesuai gaya penulisan asli user.\n"
             "6. Hanya jika user secara spesifik menanyakan pricelist lengkap, daftar harga lengkap, atau list harga keseluruhan, kirimkan TEMPLATE PRICELIST RESMI di atas secara persis. Jika user hanya menanyakan harga produk spesifik (misal: 'vcs berapa', 'vip berapa', 'harga vcs'), jawablah secara singkat, santai, dan natural sesuai contoh riwayat chat (RAG) (misal: 'vcs 100k kakk' atau 'vip cuma 50k kakk').\n"
-            "7. Jika user setuju/ingin melakukan pembayaran (misal memilih 'vcs' atau 'vip'), atau meminta dikirimkan QRIS baru/ulang, kamu WAJIB menyisipkan tag [qris] di akhir baris kalimat balasan tempat kamu mengirimkan QRIS (contoh: \"oke vcs 100k, ini qris baru nya kakk [qris]\" atau \"ini qrisnya kakk [qris]\"). Tag ini akan dideteksi sistem untuk menghasilkan QRIS secara otomatis."
+            "7. Jika user setuju/ingin melakukan pembayaran (misal memilih 'vcs' atau 'vip'), atau meminta dikirimkan QRIS baru/ulang, kamu WAJIB menyisipkan tag [qris] di akhir baris kalimat balasan tempat kamu mengirimkan QRIS (contoh: \"oke vcs 100k, ini qris baru nya kakk [qris]\" atau \"ini qrisnya kakk [qris]\"). Tag ini akan dideteksi sistem untuk menghasilkan QRIS secara otomatis.\n"
+            "8. JANGAN PERNAH menyisipkan emoji apa pun dalam balasanmu (seperti 🥺, 🫣, ❤️, dll). Balasanmu wajib berupa teks murni tanpa emoji sama sekali."
         )
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -359,6 +374,8 @@ class DigitalTwinAgent:
                 if cooldown_key in self.cooldowns:
                     del self.cooldowns[cooldown_key]
                     
+                # Ensure no emojis in the final answer
+                clean_answer = remove_emojis(clean_answer)
                 return clean_answer
             except Exception as e:
                 last_exception = e
