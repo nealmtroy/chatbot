@@ -3,7 +3,10 @@ import re
 import time
 import random
 import httpx
+import logging
 from collections import defaultdict
+
+logger = logging.getLogger("DigitalTwinAgent")
 from typing import List, Dict, Union, Tuple
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -259,7 +262,7 @@ class DigitalTwinAgent:
         final_targets = available_targets if available_targets else cooled_down_targets
         total_targets = len(final_targets)
         
-        print(f"🤖 [DEBUG MULTI-PROVIDER LLM] Menyiapkan pemanggilan ({total_targets} target provider/key/model aktif)...")
+        logger.info(f"🤖 [DEBUG MULTI-PROVIDER LLM] Menyiapkan pemanggilan ({total_targets} target provider/key/model aktif)...")
 
         last_exception = None
         for idx, target in enumerate(final_targets, 1):
@@ -269,7 +272,7 @@ class DigitalTwinAgent:
             client = target["client"]
             cooldown_key = (target["provider"], target["key_name"], target["model"])
 
-            print(f"   ⏳ [TRY TARGET {idx}/{total_targets}] [{provider_name}] ({key_name}) -> Model '{model_name}'...")
+            logger.info(f"   ⏳ [TRY TARGET {idx}/{total_targets}] [{provider_name}] ({key_name}) -> Model '{model_name}'...")
             try:
                 response = client.chat.completions.create(
                     model=model_name,
@@ -281,12 +284,12 @@ class DigitalTwinAgent:
                 debug_thinking, clean_answer = self._extract_thinking_and_clean_answer(raw_answer)
                 
                 if debug_thinking:
-                    print(f"   🧠 [DEBUG THINKING/REASONING]:")
+                    logger.info(f"   🧠 [DEBUG THINKING/REASONING]:")
                     for line in debug_thinking.split("\n"):
                         if line.strip():
-                            print(f"      💭 {line.strip()}")
+                            logger.info(f"      💭 {line.strip()}")
                 
-                print(f"   ✅ [SUCCESS] Provider [{provider_name}] ({key_name}) Model '{model_name}' berhasil me-respond!\n")
+                logger.info(f"   ✅ [SUCCESS] Provider [{provider_name}] ({key_name}) Model '{model_name}' berhasil me-respond!\n")
                 
                 # Clear cooldown on success
                 if cooldown_key in self.cooldowns:
@@ -305,13 +308,13 @@ class DigitalTwinAgent:
                     cooldown_msg = "Error detected. Cooldown 30s."
                     
                 self.cooldowns[cooldown_key] = time.time() + cooldown_dur
-                print(f"   ❌ [FAILED] Provider [{provider_name}] ({key_name}) Model '{model_name}' error: {e}. ({cooldown_msg})")
+                logger.warning(f"   ❌ [FAILED] Provider [{provider_name}] ({key_name}) Model '{model_name}' error: {e}. ({cooldown_msg})")
                 
                 if idx < total_targets:
                     next_target = final_targets[idx]
-                    print(f"   🔄 [AUTO-FALLBACK] Beralih ke [{next_target['provider'].upper()}] ({next_target['key_name']}) - Model '{next_target['model']}'...")
+                    logger.info(f"   🔄 [AUTO-FALLBACK] Beralih ke [{next_target['provider'].upper()}] ({next_target['key_name']}) - Model '{next_target['model']}'...")
                 else:
-                    print(f"   ❌ [ERROR] Semua provider/key/model dalam daftar fallback gagal dipanggil.\n")
+                    logger.error(f"   ❌ [ERROR] Semua provider/key/model dalam daftar fallback gagal dipanggil.\n")
 
         if last_exception:
             raise last_exception
