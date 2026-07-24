@@ -264,43 +264,37 @@ async def process_user_buffer(account, event, user_key, user_name, sender):
             else:
                 raw_lines = [l.strip() for l in ai_response.split("\n") if l.strip()]
 
-            # Check if any line in the response contains the QRIS trigger pattern
-            has_qris_trigger = False
-            qris_index = -1
-            
-            qris_pattern = re.compile(r'[\(\[][^\)\]]*qris[^\)\]]*[\)\]]', re.IGNORECASE)
-            
             cleaned_lines = []
-            for idx, line in enumerate(raw_lines):
+            for line in raw_lines:
                 if line.lower().startswith("reply:"):
                     line = line[6:].strip()
-                
                 if line:
-                    match = qris_pattern.search(line)
-                    if match:
-                        has_qris_trigger = True
-                        qris_index = idx
-                        line = qris_pattern.sub("", line).strip()
-                        line = re.sub(r'\s+', ' ', line)
-                    
-                    if line:
-                        cleaned_lines.append(line)
-                    else:
-                        if qris_index == -1 or qris_index == idx:
-                            qris_index = len(cleaned_lines)
+                    cleaned_lines.append(line)
 
-            if not cleaned_lines and not has_qris_trigger:
+            if not cleaned_lines:
                 cleaned_lines = [ai_response]
+
+            qris_index = len(cleaned_lines)
+
+            # Call Stage Agent Classifier to deterministically check if we should trigger QRIS
+            classification = await asyncio.to_thread(
+                clients.digital_twin_agent.determine_qris_trigger,
+                user_input=combined_message,
+                conversation_history=conversation_history,
+                ai_response=ai_response
+            )
+            has_qris_trigger = classification.get("trigger_qris", False)
 
             # Handle QRIS generation if triggered
             if has_qris_trigger:
-                combined_text = " ".join(cleaned_lines) + " " + combined_message
-                amount = parse_amount_from_text(combined_text, default_amount=100000)
-                
-                is_vcs = any("vcs" in l.lower() for l in cleaned_lines) or "vcs" in combined_message.lower()
+                pkg_type = classification.get("package", "UNKNOWN").upper()
+                is_vcs = (pkg_type == "VCS") or (pkg_type == "UNKNOWN" and ("vcs" in combined_message.lower()))
                 note_prefix = "VCS" if is_vcs else "VIP"
                 
-                logger.info("Triggered QRIS creation for user tg=%s, amount=%s, type=%s", user_id_tg, amount, note_prefix)
+                default_amount = 100000 if is_vcs else 50000
+                amount = classification.get("amount") or parse_amount_from_text(combined_message + " " + ai_response, default_amount=default_amount)
+                
+                logger.info("Triggered QRIS creation for user tg=%s, amount=%s, type=%s (Classifier)", user_id_tg, amount, note_prefix)
                 
                 from vip_bot.config import load_config
                 from vip_bot.db_store import PaymentStore

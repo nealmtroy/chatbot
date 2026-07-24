@@ -297,8 +297,7 @@ class DigitalTwinAgent:
             "kamu JUGA harus memisahkan balasanmu menjadi 2 baris (enter) sesuai ritme khas user mebutuhkannya.\n"
             "5. Jawaban harus santai, natural, dan sesuai gaya penulisan asli user.\n"
             "6. Hanya jika user secara spesifik menanyakan pricelist lengkap, daftar harga lengkap, atau list harga keseluruhan, kirimkan TEMPLATE PRICELIST RESMI di atas secara persis. Jika user hanya menanyakan harga produk spesifik (misal: 'vcs berapa', 'vip berapa', 'harga vcs'), jawablah secara singkat, santai, dan natural sesuai contoh riwayat chat (RAG) (misal: 'vcs 100k kakk' atau 'vip cuma 50k kakk').\n"
-            "7. Jika user setuju/ingin melakukan pembayaran (misal secara tegas memilih paket 'vcs' atau 'vip' setelah ditawarkan), atau meminta dikirimkan QRIS baru/ulang, kamu WAJIB menyisipkan tag [qris] di akhir baris kalimat balasan tempat kamu mengirimkan QRIS (contoh: \"oke vcs 100k, ini qris baru nya kakk [qris]\"). JANGAN PERNAH menyisipkan tag [qris] jika user hanya sekadar bertanya (misal: 'vcs itu apa?', 'harganya berapa?', atau 'bisa vcs?'). Tag ini hanya boleh dikirim saat user siap membayar.\n"
-            "8. JANGAN PERNAH menyisipkan emoji apa pun dalam balasanmu (seperti 🥺, 🫣, ❤️, dll). Balasanmu wajib berupa teks murni tanpa emoji sama sekali."
+            "7. JANGAN PERNAH menyisipkan emoji apa pun dalam balasanmu (seperti 🥺, 🫣, ❤️, dll). Balasanmu wajib berupa teks murni tanpa emoji sama sekali."
         )
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -400,3 +399,103 @@ class DigitalTwinAgent:
         if last_exception:
             raise last_exception
         return "Gagal mendapatkan respon dari AI."
+
+    def determine_qris_trigger(self, user_input: str, conversation_history: list, ai_response: str) -> dict:
+        """Deterministically classify whether the AI is sending a QRIS based on conversation context."""
+        # 1. Format the conversation context for the classifier
+        history_str = ""
+        if conversation_history:
+            for msg in conversation_history[-6:]:  # Only look at the last few messages for efficiency
+                role = "User" if msg["role"] == "user" else "Asisten"
+                history_str += f"{role}: {msg['content']}\n"
+        
+        prompt = (
+            "Kamu adalah AI Classifier System yang bertugas menentukan apakah sistem harus membuatkan tagihan/QRIS pembayaran untuk user berdasarkan riwayat chat.\n\n"
+            "TUGAS UTAMA:\n"
+            "Analisis riwayat percakapan, pesan terbaru dari User, serta rencana balasan dari Asisten berikut:\n\n"
+            "--- CONTEXT START ---\n"
+            f"{history_str}"
+            f"User Terbaru: {user_input}\n"
+            f"Rencana Balasan Asisten: {ai_response}\n"
+            "--- CONTEXT END ---\n\n"
+            "Tentukan apakah Asisten secara aktif setuju/ingin mengirimkan QRIS pembayaran baru untuk produk VCS atau VIP group.\n\n"
+            "ATURAN KLASIFIKASI:\n"
+            "1. Output WAJIB berupa JSON valid dengan format persis seperti ini:\n"
+            "   {\"trigger_qris\": true/false, \"package\": \"VCS\"/\"VIP\"/\"UNKNOWN\", \"amount\": integer/null}\n"
+            "2. Set 'trigger_qris' menjadi true HANYA jika:\n"
+            "   - Asisten menyatakan sedang/akan mengirimkan QRIS/barcode/pembayaran sekarang (contoh: 'oke vcs 100k, ini qris nya kakk', 'bentar aku buatin barcode-nya ya', 'ini ya kakk', dll).\n"
+            "   - DAN User telah secara eksplisit setuju atau meminta QRIS tersebut (misal memilih 'vcs' atau 'vip').\n"
+            "3. Set 'trigger_qris' menjadi false jika:\n"
+            "   - Asisten baru menawarkan pilihan paket (misal: 'mau vcs atau vip kakk?') tapi user belum memilih.\n"
+            "   - User hanya bertanya tentang info harga, info vcs, atau hal lain tanpa adanya kesepakatan transaksi aktif.\n"
+            "4. Tentukan nominal 'amount':\n"
+            "   - VCS = 100000\n"
+            "   - VIP = 50000\n"
+            "   - Jika ada nominal custom lain yang disepakati, gunakan nominal tersebut.\n\n"
+            "JAPAN BERIKAN PENJELASAN LAIN. HANYA OUTPUTKAN JSON SECARA PERSIS."
+        )
+
+        messages = [
+            {"role": "system", "content": "Kamu adalah JSON classifier deterministik. Output harus selalu berupa JSON valid."},
+            {"role": "user", "content": prompt}
+        ]
+
+        # Call targets using the same Multi-Provider loop but with temperature=0.0 and max_tokens=100
+        # Build available targets
+        targets_by_provider = defaultdict(list)
+        for target in self.provider_targets:
+            targets_by_provider[target["provider"]].append(target)
+        ordered_providers = [p for p in PROVIDERS_CONFIG.keys() if p in targets_by_provider]
+        shuffled_targets = []
+        for provider in ordered_providers:
+            provider_list = list(targets_by_provider[provider])
+            random.shuffle(provider_list)
+            shuffled_targets.extend(provider_list)
+        
+        current_time = time.time()
+        available_targets = []
+        cooled_down_targets = []
+        for target in shuffled_targets:
+            cooldown_key = (target["provider"], target["key_name"], target["model"])
+            if current_time < self.cooldowns.get(cooldown_key, 0):
+                cooled_down_targets.append(target)
+            else:
+                available_targets.append(target)
+        
+        final_targets = available_targets if available_targets else cooled_down_targets
+        total_targets = len(final_targets)
+
+        logger.info(f"🤖 [STAGE AGENT CLASSIFIER] Menyiapkan analisis trigger QRIS ({total_targets} target)...")
+
+        for idx, target in enumerate(final_targets, 1):
+            provider_name = target["provider"].upper()
+            key_name = target["key_name"]
+            model_name = target["model"]
+            client = target["client"]
+            cooldown_key = (target["provider"], target["key_name"], target["model"])
+
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    temperature=0.0,  # Deterministik
+                    max_tokens=100,
+                )
+                raw_answer = response.choices[0].message.content.strip()
+                
+                # Try to extract JSON from the answer
+                json_match = re.search(r'\{.*\}', raw_answer, re.DOTALL)
+                if json_match:
+                    import json
+                    result = json.loads(json_match.group(0))
+                    logger.info(f"   ✅ [CLASSIFIER SUCCESS] {provider_name} ({model_name}) -> Result: {result}")
+                    return result
+                
+                raise ValueError(f"No JSON found in response: {raw_answer!r}")
+            except Exception as e:
+                # Set cooldown
+                self.cooldowns[cooldown_key] = time.time() + 30
+                logger.warning(f"   ❌ [CLASSIFIER FAILED] {provider_name} ({model_name}) error: {e}")
+
+        # Fallback to trigger_qris = False on total failure
+        return {"trigger_qris": False, "package": "UNKNOWN", "amount": None}
