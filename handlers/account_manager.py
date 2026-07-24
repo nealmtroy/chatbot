@@ -309,6 +309,21 @@ async def process_user_buffer(account, event, user_key, user_name, sender):
                 vip_config = load_config()
                 payment_store = PaymentStore(vip_config)
                 
+                # Expire previous pending payment if any to prevent PostgreSQL unique constraint violation
+                try:
+                    latest_payment = await asyncio.to_thread(payment_store.latest_payment_for_user, user_id_tg)
+                    if latest_payment and latest_payment.get("status") == "pending":
+                        logger.info("Expiring previous pending payment %s to make room for new QRIS", latest_payment.get("inv_id"))
+                        await asyncio.to_thread(
+                            payment_store.mark_status_if_current,
+                            latest_payment["inv_id"],
+                            "pending",
+                            "expired",
+                            "Replaced by new QRIS request"
+                        )
+                except Exception as expire_exc:
+                    logger.warning("Gagal meng-expire pembayaran pending sebelumnya: %s", expire_exc)
+                
                 try:
                     (
                         _session,
