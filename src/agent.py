@@ -2,6 +2,7 @@ import os
 import re
 import time
 import random
+import httpx
 from collections import defaultdict
 from typing import List, Dict, Union, Tuple
 from dotenv import load_dotenv
@@ -89,6 +90,11 @@ class DigitalTwinAgent:
         self.provider_targets = []
         self.cooldowns = {}
 
+        proxy_url = os.getenv("PROXY_URL", "").strip()
+        http_client = None
+        if proxy_url:
+            http_client = httpx.Client(proxies=proxy_url)
+
         # Load active providers and multiple keys from .env
         for p_name, cfg in PROVIDERS_CONFIG.items():
             base_env = cfg["api_key_env"]
@@ -105,10 +111,12 @@ class DigitalTwinAgent:
                     models = cfg["default_models"]
 
                 for key_name, api_key in api_keys:
+                    is_local = "localhost" in cfg["base_url"] or "127.0.0.1" in cfg["base_url"]
                     client = OpenAI(
                         base_url=cfg["base_url"],
                         api_key=api_key,
-                        max_retries=0
+                        max_retries=0,
+                        http_client=None if (is_local or not http_client) else http_client
                     )
                     for model in models:
                         self.provider_targets.append({
