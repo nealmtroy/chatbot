@@ -1,5 +1,8 @@
 import os
 import re
+import time
+import random
+from collections import defaultdict
 from typing import List, Dict, Union, Tuple
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -84,6 +87,7 @@ class DigitalTwinAgent:
     def __init__(self, data_dir: str):
         self.data_dir = data_dir
         self.provider_targets = []
+        self.cooldowns = {}
 
         # Load active providers and multiple keys from .env
         for p_name, cfg in PROVIDERS_CONFIG.items():
@@ -217,15 +221,44 @@ class DigitalTwinAgent:
 
         messages.append({"role": "user", "content": user_input})
 
-        total_targets = len(self.provider_targets)
+        # 1. Group active targets by provider, keeping the priority order from PROVIDERS_CONFIG
+        targets_by_provider = defaultdict(list)
+        for target in self.provider_targets:
+            targets_by_provider[target["provider"]].append(target)
+            
+        ordered_providers = [p for p in PROVIDERS_CONFIG.keys() if p in targets_by_provider]
+        
+        # 2. Shuffle targets within each provider to load-balance
+        shuffled_targets = []
+        for provider in ordered_providers:
+            provider_list = list(targets_by_provider[provider])
+            random.shuffle(provider_list)
+            shuffled_targets.extend(provider_list)
+            
+        # 3. Filter targets currently in cooldown
+        current_time = time.time()
+        available_targets = []
+        cooled_down_targets = []
+        for target in shuffled_targets:
+            cooldown_key = (target["provider"], target["key_name"], target["model"])
+            if current_time < self.cooldowns.get(cooldown_key, 0):
+                cooled_down_targets.append(target)
+            else:
+                available_targets.append(target)
+                
+        # If all targets are in cooldown, use all targets as a fallback
+        final_targets = available_targets if available_targets else cooled_down_targets
+        total_targets = len(final_targets)
+        
         print(f"🤖 [DEBUG MULTI-PROVIDER LLM] Menyiapkan pemanggilan ({total_targets} target provider/key/model aktif)...")
 
         last_exception = None
-        for idx, target in enumerate(self.provider_targets, 1):
+        for idx, target in enumerate(final_targets, 1):
             provider_name = target["provider"].upper()
             key_name = target["key_name"]
             model_name = target["model"]
             client = target["client"]
+            cooldown_key = (target["provider"], target["key_name"], target["model"])
 
             print(f"   ⏳ [TRY TARGET {idx}/{total_targets}] [{provider_name}] ({key_name}) -> Model '{model_name}'...")
             try:
@@ -245,12 +278,28 @@ class DigitalTwinAgent:
                             print(f"      💭 {line.strip()}")
                 
                 print(f"   ✅ [SUCCESS] Provider [{provider_name}] ({key_name}) Model '{model_name}' berhasil me-respond!\n")
+                
+                # Clear cooldown on success
+                if cooldown_key in self.cooldowns:
+                    del self.cooldowns[cooldown_key]
+                    
                 return clean_answer
             except Exception as e:
                 last_exception = e
-                print(f"   ❌ [FAILED] Provider [{provider_name}] ({key_name}) Model '{model_name}' error: {e}")
+                # Set cooldown based on error type
+                error_str = str(e).lower()
+                if "rate limit" in error_str or "429" in error_str or "too many requests" in error_str:
+                    cooldown_dur = 60
+                    cooldown_msg = "Rate limit detected. Cooldown 60s."
+                else:
+                    cooldown_dur = 30
+                    cooldown_msg = "Error detected. Cooldown 30s."
+                    
+                self.cooldowns[cooldown_key] = time.time() + cooldown_dur
+                print(f"   ❌ [FAILED] Provider [{provider_name}] ({key_name}) Model '{model_name}' error: {e}. ({cooldown_msg})")
+                
                 if idx < total_targets:
-                    next_target = self.provider_targets[idx]
+                    next_target = final_targets[idx]
                     print(f"   🔄 [AUTO-FALLBACK] Beralih ke [{next_target['provider'].upper()}] ({next_target['key_name']}) - Model '{next_target['model']}'...")
                 else:
                     print(f"   ❌ [ERROR] Semua provider/key/model dalam daftar fallback gagal dipanggil.\n")
