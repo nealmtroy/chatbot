@@ -297,7 +297,8 @@ class DigitalTwinAgent:
             "kamu JUGA harus memisahkan balasanmu menjadi 2 baris (enter) sesuai ritme khas user mebutuhkannya.\n"
             "5. Jawaban harus santai, natural, dan sesuai gaya penulisan asli user.\n"
             "6. Hanya jika user secara spesifik menanyakan pricelist lengkap, daftar harga lengkap, atau list harga keseluruhan, kirimkan TEMPLATE PRICELIST RESMI di atas secara persis. Jika user hanya menanyakan harga produk spesifik (misal: 'vcs berapa', 'vip berapa', 'harga vcs'), jawablah secara singkat, santai, dan natural sesuai contoh riwayat chat (RAG) (misal: 'vcs 100k kakk' atau 'vip cuma 50k kakk').\n"
-            "7. JANGAN PERNAH menyisipkan emoji apa pun dalam balasanmu (seperti 🥺, 🫣, ❤️, dll). Balasanmu wajib berupa teks murni tanpa emoji sama sekali."
+            "7. JANGAN PERNAH menyisipkan emoji apa pun dalam balasanmu (seperti 🥺, 🫣, ❤️, dll). Balasanmu wajib berupa teks murni tanpa emoji sama sekali.\n"
+            "8. JANGAN PERNAH berasumsi user langsung ingin membeli atau membayar jika mereka baru pertama kali menyebut kata kunci singkat (seperti 'vcs' atau 'vip'). Jawablah dengan menjelaskan harga terlebih dahulu (misal: 'vcs 100k kakk' atau 'vcs 100rb sayangg') dan tawarkan apakah mereka ingin dibuatkan barcode pembayarannya sekarang. Baru katakan bahwa kamu akan mengirimkan barcode/pembayaran jika mereka sudah mengiyakan atau memintanya secara jelas."
         )
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -424,8 +425,9 @@ class DigitalTwinAgent:
             "   {\"trigger_qris\": true/false, \"package\": \"VCS\"/\"VIP\"/\"UNKNOWN\", \"amount\": integer/null}\n"
             "2. Set 'trigger_qris' menjadi true HANYA jika:\n"
             "   - Asisten menyatakan sedang/akan mengirimkan QRIS/barcode/pembayaran sekarang (contoh: 'oke vcs 100k, ini qris nya kakk', 'bentar aku buatin barcode-nya ya', 'ini ya kakk', dll).\n"
-            "   - DAN User telah secara eksplisit setuju atau meminta QRIS tersebut (misal memilih 'vcs' atau 'vip').\n"
+            "   - DAN User telah secara eksplisit setuju atau meminta QRIS tersebut (misal mengetik 'mau order vcs', 'oke buatin barcodenya', 'kirim qrisnya', 'cara bayarnya gimana', dll).\n"
             "3. Set 'trigger_qris' menjadi false jika:\n"
+            "   - User hanya mengetik kata kunci singkat seperti 'vcs', 'vip', atau sekadar menyapa dan bertanya harga tanpa menyatakan setuju/mau beli secara tegas.\n"
             "   - Asisten baru menawarkan pilihan paket (misal: 'mau vcs atau vip kakk?') tapi user belum memilih.\n"
             "   - User hanya bertanya tentang info harga, info vcs, atau hal lain tanpa adanya kesepakatan transaksi aktif.\n"
             "4. Tentukan nominal 'amount':\n"
