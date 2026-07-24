@@ -196,6 +196,54 @@ class DigitalTwinAgent:
         debug_thinking = "\n".join(thinking_parts).strip()
         return debug_thinking, (final_answer if final_answer else clean_text)
 
+    def _is_invalid_reasoning(self, text: str) -> bool:
+        """
+        Check if the text is a reasoning/analysis monologue instead of a valid casual reply.
+        Returns True if it contains analytical English patterns or reasoning leaks.
+        """
+        text_lower = text.lower()
+        
+        # 1. Clear indicators of reasoning/thinking monologue
+        reasoning_signals = [
+            "the user is asking",
+            "the standard response",
+            "checking the system info",
+            "should be stating",
+            "the template says",
+            "reply short and natural",
+            "previous interactions",
+            "chat history",
+            "appropriate response",
+            "this is a typo",
+            "probably a typo",
+            "shorthand for",
+            "stating the price",
+            "casual follow-up",
+            "look at the history",
+            "based on the history",
+            "let's analyze",
+            "the response should",
+            "in the previous chat",
+            "user hasn't made any payment",
+            "system instruction",
+            "system info",
+            "the context is",
+            "suggesting that"
+        ]
+        
+        if any(sig in text_lower for sig in reasoning_signals):
+            return True
+            
+        # 2. Check if the text is purely fluent English-instruction-style output
+        english_indicators = ["should be", "probably", "assume", "response", "therefore", "instead of", "suggests", "concerning"]
+        if any(indicator in text_lower for indicator in english_indicators):
+            indo_slang = ["kakk", "kak", "krak", "sange", "vcs", "ga", "ada", "aku", "kamu", "nih", "ya", "sih", "dong", "deh", "bisa", "harga", "qris", "bayar"]
+            has_indo = any(slang in text_lower for slang in indo_slang)
+            if not has_indo:
+                return True
+                
+        return False
+
     def generate_response(self, user_input: str, conversation_history: list = None, system_instruction: str = None) -> str:
         """Generate response matching exact WhatsApp export conversation flow and typing style."""
         rag_context = self.rag.get_context_for_prompt(user_input, top_k=3)
@@ -288,6 +336,10 @@ class DigitalTwinAgent:
                     for line in debug_thinking.split("\n"):
                         if line.strip():
                             logger.info(f"      💭 {line.strip()}")
+                
+                # Check for reasoning leaks in final answer
+                if self._is_invalid_reasoning(clean_answer):
+                    raise ValueError(f"Reasoning leak detected in final answer: {clean_answer!r}")
                 
                 logger.info(f"   ✅ [SUCCESS] Provider [{provider_name}] ({key_name}) Model '{model_name}' berhasil me-respond!\n")
                 
