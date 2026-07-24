@@ -492,3 +492,28 @@ async def run_all():
         if cl:
             started.append(cl)
     return started
+
+
+async def start_account_by_id(account_id: int):
+    # Stop first if already running
+    if account_id in CLIENTS:
+        await stop_account_by_id(account_id)
+        
+    account = db.get_account(account_id)
+    if not account:
+        logger.error("Account ID %s tidak ditemukan di DB.", account_id)
+        return None
+        
+    return await start_account(account)
+
+
+async def stop_account_by_id(account_id: int):
+    client = CLIENTS.pop(account_id, None)
+    AUTO_REPLY.pop(account_id, None)
+    if client:
+        try:
+            await client.disconnect()
+            logger.info("✅ Account ID %s disconnected.", account_id)
+        except Exception as e:
+            logger.error("Error disconnecting account ID %s: %s", account_id, e)
+
