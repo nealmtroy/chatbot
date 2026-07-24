@@ -35,6 +35,7 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
+logging.getLogger("telethon").setLevel(logging.WARNING)
 logger = logging.getLogger("VIPAutomationSystem")
 
 
