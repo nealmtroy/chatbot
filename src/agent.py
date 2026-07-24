@@ -93,7 +93,7 @@ class DigitalTwinAgent:
         proxy_url = os.getenv("PROXY_URL", "").strip()
         http_client = None
         if proxy_url:
-            http_client = httpx.Client(proxies=proxy_url)
+            http_client = httpx.Client(proxy=proxy_url)
 
         # Load active providers and multiple keys from .env
         for p_name, cfg in PROVIDERS_CONFIG.items():
