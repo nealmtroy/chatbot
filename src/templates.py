@@ -34,15 +34,18 @@ class TemplateManager:
         with open(self.config_path, "w", encoding="utf-8") as f:
             json.dump(self.config, f, indent=2, ensure_ascii=False)
 
-    def get_pricelist_template(self) -> str:
+    def get_pricelist_template(self, overrides: dict = None) -> str:
         """Generate dynamic pricelist based on active persona config."""
         self.load_config()
-        name = self.config.get("bot_name", "Intan")
-        vcs = self.config.get("vcs_price", "100K")
-        vip = self.config.get("vip_price", "50K")
-        desah = self.config.get("desah_price", "+25K")
-        squirt = self.config.get("squirt_price", "+50K")
-        dildo = self.config.get("dildo_price", "+25K")
+        merged = dict(self.config)
+        if overrides:
+            merged.update(overrides)
+        name = merged.get("bot_name", "Intan")
+        vcs = merged.get("vcs_price", "100K")
+        vip = merged.get("vip_price", "50K")
+        desah = merged.get("desah_price", "+25K")
+        squirt = merged.get("squirt_price", "+50K")
+        dildo = merged.get("dildo_price", "+25K")
 
         return (
             f"𝑷𝒓𝒊𝒄𝒆𝒍𝒊𝒔𝒕 {name}\n\n"
@@ -56,9 +59,12 @@ class TemplateManager:
             f"Bayar sekali aja, akses permanen."
         )
 
-    def replace_placeholders(self, text: str) -> str:
+    def replace_placeholders(self, text: str, overrides: dict = None) -> str:
         """Replace {bot_name}, {vcs_price}, {vip_price}, etc. in text."""
         self.load_config()
-        for key, val in self.config.items():
+        merged = dict(self.config)
+        if overrides:
+            merged.update(overrides)
+        for key, val in merged.items():
             text = text.replace(f"{{{key}}}", str(val))
         return text

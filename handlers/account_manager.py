@@ -227,7 +227,8 @@ async def process_user_buffer(account, event, user_key, user_name, sender):
                         clients.digital_twin_agent.generate_response,
                         user_input=combined_message,
                         conversation_history=conversation_history,
-                        system_instruction=system_instruction
+                        system_instruction=system_instruction,
+                        account=account
                     )
             except Exception as e:
                 logger.error("Gagal generate_response dari DigitalTwinAgent untuk user %s: %s", user_name, e)
@@ -240,8 +241,18 @@ async def process_user_buffer(account, event, user_key, user_name, sender):
             # Format lines into bubbles (keep pricelist intact as a single bubble)
             is_pricelist = any(kw in ai_response.lower() for kw in ["pricelist", "daftar harga", "vcs —", "vcs -", "vip group"])
             if is_pricelist:
-                pricelist_text = clients.digital_twin_agent.template_mgr.get_pricelist_template()
-                bot_name_config = clients.digital_twin_agent.template_mgr.config.get("bot_name", "Intan")
+                overrides = {}
+                if account:
+                    if account.get("name"):
+                        overrides["bot_name"] = account["name"]
+                    if account.get("city"):
+                        overrides["origin"] = account["city"]
+                    if account.get("age"):
+                        overrides["age"] = f"{account['age']} thn"
+                    if account.get("vip_price"):
+                        overrides["vip_price"] = f"{int(account['vip_price']) // 1000}K"
+                pricelist_text = clients.digital_twin_agent.template_mgr.get_pricelist_template(overrides)
+                bot_name_config = overrides.get("bot_name", clients.digital_twin_agent.template_mgr.config.get("bot_name", "Intan"))
                 active_bot_name = account.get("name", "Intan").capitalize()
                 stylized_active_name = to_math_bold_italic(active_bot_name)
                 

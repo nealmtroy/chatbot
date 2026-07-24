@@ -244,13 +244,24 @@ class DigitalTwinAgent:
                 
         return False
 
-    def generate_response(self, user_input: str, conversation_history: list = None, system_instruction: str = None) -> str:
+    def generate_response(self, user_input: str, conversation_history: list = None, system_instruction: str = None, account: dict = None) -> str:
         """Generate response matching exact WhatsApp export conversation flow and typing style."""
+        overrides = {}
+        if account:
+            if account.get("name"):
+                overrides["bot_name"] = account["name"]
+            if account.get("city"):
+                overrides["origin"] = account["city"]
+            if account.get("age"):
+                overrides["age"] = f"{account['age']} thn"
+            if account.get("vip_price"):
+                overrides["vip_price"] = f"{int(account['vip_price']) // 1000}K"
+
         rag_context = self.rag.get_context_for_prompt(user_input, top_k=3)
-        formatted_rag_context = self.template_mgr.replace_placeholders(rag_context)
+        formatted_rag_context = self.template_mgr.replace_placeholders(rag_context, overrides)
         
-        bot_name = self.template_mgr.config.get("bot_name", "Intan")
-        pricelist_template = self.template_mgr.get_pricelist_template()
+        bot_name = overrides.get("bot_name", self.template_mgr.config.get("bot_name", "Intan"))
+        pricelist_template = self.template_mgr.get_pricelist_template(overrides)
 
         system_prompt = (
             f"Kamu adalah AI Persona / Digital Twin dengan nama '{bot_name}'.\n"
