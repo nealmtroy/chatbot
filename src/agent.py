@@ -107,7 +107,8 @@ class DigitalTwinAgent:
                 for key_name, api_key in api_keys:
                     client = OpenAI(
                         base_url=cfg["base_url"],
-                        api_key=api_key
+                        api_key=api_key,
+                        max_retries=0
                     )
                     for model in models:
                         self.provider_targets.append({
