@@ -422,7 +422,12 @@ class DigitalTwinAgent:
             "Tentukan apakah Asisten secara aktif setuju/ingin mengirimkan QRIS pembayaran baru untuk produk VCS atau VIP group.\n\n"
             "ATURAN KLASIFIKASI:\n"
             "1. Output WAJIB berupa JSON valid dengan format persis seperti ini:\n"
-            "   {\"trigger_qris\": true/false, \"package\": \"VCS\"/\"VIP\"/\"UNKNOWN\", \"amount\": integer/null}\n"
+            "   {\n"
+            "     \"analysis\": \"tulis analisis/alasan singkat di sini\",\n"
+            "     \"trigger_qris\": true/false,\n"
+            "     \"package\": \"VCS\"/\"VIP\"/\"UNKNOWN\",\n"
+            "     \"amount\": integer/null\n"
+            "   }\n"
             "2. Set 'trigger_qris' menjadi true HANYA jika:\n"
             "   - Asisten menyatakan sedang/akan mengirimkan QRIS/barcode/pembayaran sekarang (contoh: 'oke vcs 100k, ini qris nya kakk', 'bentar aku buatin barcode-nya ya', 'ini ya kakk', dll).\n"
             "   - DAN User telah secara eksplisit setuju atau meminta QRIS tersebut (misal mengetik 'mau order vcs', 'oke buatin barcodenya', 'kirim qrisnya', 'cara bayarnya gimana', dll).\n"
@@ -434,7 +439,7 @@ class DigitalTwinAgent:
             "   - VCS = 100000\n"
             "   - VIP = 50000\n"
             "   - Jika ada nominal custom lain yang disepakati, gunakan nominal tersebut.\n\n"
-            "JANGAN BERIKAN PENJELASAN LAIN. HANYA OUTPUTKAN JSON SECARA PERSIS."
+            "PENTING: Output Anda harus berupa blok JSON valid saja. JANGAN sertakan penjelasan apa pun di luar blok JSON. Mulailah output langsung dengan karakter '{' dan akhiri dengan '}'."
         )
 
         messages = [
