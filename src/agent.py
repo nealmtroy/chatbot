@@ -432,7 +432,7 @@ class DigitalTwinAgent:
             "   - VCS = 100000\n"
             "   - VIP = 50000\n"
             "   - Jika ada nominal custom lain yang disepakati, gunakan nominal tersebut.\n\n"
-            "JAPAN BERIKAN PENJELASAN LAIN. HANYA OUTPUTKAN JSON SECARA PERSIS."
+            "JANGAN BERIKAN PENJELASAN LAIN. HANYA OUTPUTKAN JSON SECARA PERSIS."
         )
 
         messages = [
@@ -440,7 +440,7 @@ class DigitalTwinAgent:
             {"role": "user", "content": prompt}
         ]
 
-        # Call targets using the same Multi-Provider loop but with temperature=0.0 and max_tokens=100
+        # Call targets using the same Multi-Provider loop but with temperature=0.0 and max_tokens=500
         # Build available targets
         targets_by_provider = defaultdict(list)
         for target in self.provider_targets:
@@ -479,7 +479,7 @@ class DigitalTwinAgent:
                     model=model_name,
                     messages=messages,
                     temperature=0.0,  # Deterministik
-                    max_tokens=100,
+                    max_tokens=500,
                 )
                 raw_answer = response.choices[0].message.content.strip()
                 
@@ -487,11 +487,26 @@ class DigitalTwinAgent:
                 json_match = re.search(r'\{.*\}', raw_answer, re.DOTALL)
                 if json_match:
                     import json
-                    result = json.loads(json_match.group(0))
-                    logger.info(f"   ✅ [CLASSIFIER SUCCESS] {provider_name} ({model_name}) -> Result: {result}")
+                    try:
+                        result = json.loads(json_match.group(0))
+                        logger.info(f"   ✅ [CLASSIFIER SUCCESS] {provider_name} ({model_name}) -> Result: {result}")
+                        return result
+                    except Exception as json_err:
+                        logger.warning(f"   ⚠️ Failed to parse JSON with json.loads: {json_err}. Trying regex fallback...")
+                
+                # Regex-based fallback parser (very robust even if truncated)
+                trigger_match = re.search(r'"trigger_qris"\s*:\s*(true|false)', raw_answer.lower())
+                if trigger_match:
+                    is_trigger = (trigger_match.group(1) == "true")
+                    package_match = re.search(r'"package"\s*:\s*"([^"]+)"', raw_answer)
+                    pkg = package_match.group(1).upper() if package_match else "UNKNOWN"
+                    amount_match = re.search(r'"amount"\s*:\s*(\d+)', raw_answer)
+                    amount = int(amount_match.group(1)) if amount_match else None
+                    result = {"trigger_qris": is_trigger, "package": pkg, "amount": amount}
+                    logger.info(f"   ✅ [CLASSIFIER SUCCESS REGEX FALLBACK] {provider_name} ({model_name}) -> Result: {result}")
                     return result
                 
-                raise ValueError(f"No JSON found in response: {raw_answer!r}")
+                raise ValueError(f"No JSON or regex patterns found in response: {raw_answer!r}")
             except Exception as e:
                 # Set cooldown
                 self.cooldowns[cooldown_key] = time.time() + 30
