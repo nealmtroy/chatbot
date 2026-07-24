@@ -148,6 +148,7 @@ async def process_paid_payment(client, config, store, payment):
             int(payment.get("invite_expire_hours") or 0) or config.invite_expire_hours,
             internal_telegram_chat_url(payment.get("vip_chat_id")),
         ),
+        payment=payment,
         parse_mode="html",
         link_preview=False,
     )
@@ -220,6 +221,7 @@ async def poll_once(client, config, store, payment):
                 store,
                 payment["user_id"],
                 invalid_payment_message(payment.get("package_name") or "VIP"),
+                payment=payment,
                 parse_mode="html",
                 buttons=package_buttons(config, store) if "vcs" not in (payment.get("package_code") or "").lower() else None,
             )
@@ -302,6 +304,7 @@ async def expire_pending_payment(client, config, store, payment, title="Payment 
         store,
         payment["user_id"],
         timeout_payment_message(payment.get("package_name") or "VIP"),
+        payment=payment,
         parse_mode="html",
         buttons=package_buttons(config, store) if "vcs" not in (payment.get("package_code") or "").lower() else None,
     )

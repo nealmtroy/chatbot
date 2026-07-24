@@ -451,11 +451,43 @@ async def send_log(client, config, store, text, **kwargs):
         LOGGER.warning("Failed to send log message to %s: %s", log_chat_id, exc)
 
 
-async def safe_send_user(client, config, store, user_id, text, **kwargs):
+async def safe_send_user(client, config, store, user_id, text, payment=None, **kwargs):
     # Try sending via userbots first so it appears directly in their chat with the girl
     try:
         from handlers.account_manager import CLIENTS as userbot_clients
-        for ub_client in list(userbot_clients.values()):
+        clients_list = list(userbot_clients.values())
+        
+        # Prioritize the userbot that actually generated/managed this chat or payment
+        prioritized_clients = []
+        other_clients = []
+        
+        for ub_client in clients_list:
+            is_correct_bot = False
+            # Check 1: If payment message exists, try to retrieve it using this client
+            if payment and payment.get("qris_message_id"):
+                try:
+                    msg = await ub_client.get_messages(user_id, ids=int(payment["qris_message_id"]))
+                    if msg is not None:
+                        is_correct_bot = True
+                except Exception:
+                    pass
+            
+            # Check 2: Try to retrieve the last message in chat history to check if they have active conversation
+            if not is_correct_bot:
+                try:
+                    msgs = await ub_client.get_messages(user_id, limit=1)
+                    if msgs:
+                        is_correct_bot = True
+                except Exception:
+                    pass
+            
+            if is_correct_bot:
+                prioritized_clients.append(ub_client)
+            else:
+                other_clients.append(ub_client)
+                
+        # Attempt to deliver using prioritized clients first, then fall back to others
+        for ub_client in (prioritized_clients + other_clients):
             try:
                 entity = await ub_client.get_entity(user_id)
                 await ub_client.send_message(entity, text, **kwargs)
