@@ -312,7 +312,7 @@ async def process_user_buffer(account, event, user_key, user_name, sender):
                             payment_store.mark_status_if_current,
                             latest_payment["inv_id"],
                             "pending",
-                            "expired",
+                            "failed_or_expired",
                             "Replaced by new QRIS request"
                         )
                 except Exception as expire_exc:
