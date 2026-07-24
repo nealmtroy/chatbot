@@ -184,7 +184,9 @@ async def process_user_buffer(account, event, user_key, user_name, sender):
                             f"untuk nominal {amount_str} ({pkg_name}). "
                             f"Jika user bertanya 'sudah masuk belum', 'sudah bayar', atau mengaku sudah membayar padahal belum terdeteksi, "
                             f"jelaskan dengan santai/casual bahwa pembayarannya masih belum terdeteksi oleh sistem "
-                            f"dan minta mereka menunggu sebentar atau pastikan nominal transfer sudah pas.]"
+                            f"dan minta mereka menunggu sebentar atau pastikan nominal transfer sudah pas. "
+                            f"Jika user meminta dikirimkan ulang QRIS-nya atau ingin dibuatkan QRIS baru, "
+                            f"kamu harus menyisipkan tag [qris] di akhir pesan balasanmu (contoh: 'ini qris nya kakk [qris]').]"
                         )
                     elif status in {"paid", "processing_paid", "processing_delivery"}:
                         system_instruction = (
@@ -197,7 +199,8 @@ async def process_user_buffer(account, event, user_key, user_name, sender):
                         system_instruction = (
                             f"[SYSTEM INFO: Status pembayaran user saat ini adalah EXPIRED / KEDALUWARSA. "
                             f"Jika user menanyakan status pembayaran atau ingin bayar, beri tahu mereka bahwa QRIS sebelumnya "
-                            f"sudah kedaluwarsa/mati, dan minta mereka bilang jika ingin dikirimkan QRIS baru lagi.]"
+                            f"sudah kedaluwarsa/mati, dan minta mereka bilang jika ingin dikirimkan QRIS baru lagi. "
+                            f"Jika user setuju meminta/mengirimkan QRIS baru, kamu harus menyisipkan tag [qris] di akhir pesan balasanmu (contoh: 'ini qris baru nya kakk [qris]').]"
                         )
                 else:
                     # No payment history at all
@@ -205,7 +208,9 @@ async def process_user_buffer(account, event, user_key, user_name, sender):
                         "[SYSTEM INFO: User saat ini BELUM PERNAH membuat tagihan atau QRIS sama sekali. "
                         "Jika user mengaku sudah membayar atau mengonfirmasi pembayaran, "
                         "katakan dengan santai/casual bahwa mereka belum minta QRIS-nya sama sekali "
-                        "dan tawarkan untuk mengirimkan QRIS jika mereka mau melakukan pembayaran.]"
+                        "dan tawarkan untuk mengirimkan QRIS jika mereka mau melakukan pembayaran. "
+                        "Jika user setuju atau memilih paket pembayaran (seperti VCS atau VIP) dan ingin dikirimkan QRIS, "
+                        "kamu harus menyisipkan tag [qris] di akhir pesan balasanmu (contoh: 'ini qris nya kakk [qris]').]"
                     )
             except Exception as e:
                 logger.warning("Gagal menyematkan status pembayaran ke prompt: %s", e)
