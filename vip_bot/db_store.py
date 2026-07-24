@@ -114,6 +114,7 @@ class PaymentStore:
         package=None,
         referral=None,
     ):
+        self.upsert_user(user)
         from vip_bot.helpers import utc_now_iso, parse_iso_datetime, next_poll_at, display_name
         import datetime as dt
         now = utc_now_iso()
