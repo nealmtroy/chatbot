@@ -226,10 +226,6 @@ async def process_user_buffer(account, event, user_key, user_name, sender):
                     )
             except Exception as e:
                 logger.error("Gagal generate_response dari DigitalTwinAgent untuk user %s: %s", user_name, e)
-                try:
-                    await event.respond("Maaf ya, aku lagi agak sibuk/ramai chat-nya. Coba chat aku lagi sebentar ya! 😊")
-                except Exception as send_err:
-                    logger.error("Gagal mengirim pesan fallback error ke user %s: %s", user_name, send_err)
                 return
 
             if not ai_response:
